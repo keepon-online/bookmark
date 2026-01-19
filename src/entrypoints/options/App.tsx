@@ -17,9 +17,13 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { HealthReport } from '@/components/linkHealth';
+import { SyncSettings } from '@/components/sync/SyncSettings';
+import { SemanticSearchSettings } from '@/components/semanticSearch/SemanticSearchSettings';
 import { useUIStore, initializeTheme } from '@/stores';
 import { initDatabase, db, exportDatabase, clearDatabase } from '@/lib/database';
 import { bookmarkService } from '@/services';
+import { linkHealthService } from '@/services/linkHealthService';
 import { cn } from '@/lib/utils';
 import type { Theme, ViewMode } from '@/types';
 import '@/styles/globals.css';
@@ -131,6 +135,15 @@ export function App() {
         </div>
 
         <div className="grid gap-6">
+          {/* 云端同步 */}
+          <SyncSettings />
+
+          {/* 语义搜索 */}
+          <SemanticSearchSettings />
+
+          {/* 链接健康 */}
+          <HealthReport onCheckAll={loadStats} />
+
           {/* 统计信息 */}
           <Card>
             <CardHeader>
@@ -293,7 +306,7 @@ export function App() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">版本</span>
-                  <span>0.1.0 (MVP)</span>
+                  <span>0.4.0 (Beta)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">技术栈</span>

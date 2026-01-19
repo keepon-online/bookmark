@@ -16,6 +16,7 @@ export default defineBackground(() => {
       console.log('[Background] Database initialized');
       setupContextMenu();
       setupAlarms();
+      setupCommands();
       console.log('[Background] Ready');
     } catch (error) {
       console.error('[Background] Initialization failed:', error);
@@ -49,6 +50,69 @@ export default defineBackground(() => {
     // 清理未使用标签 - 每周
     browser.alarms.create('cleanup-tags', {
       periodInMinutes: 60 * 24 * 7,
+    });
+  }
+
+  // 设置快捷键命令
+  function setupCommands() {
+    browser.commands.onCommand.addListener(async (command) => {
+      console.log('[Background] Command received:', command);
+
+      switch (command) {
+        case 'open-sidepanel':
+          if (browser.sidePanel) {
+            const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+            if (tab[0]?.id) {
+              await browser.sidePanel.open({ windowId: tab[0].windowId });
+            }
+          }
+          break;
+
+        case 'quick-add':
+          try {
+            const pageInfo = await getCurrentPageInfo();
+            if (pageInfo) {
+              await bookmarkService.create({
+                url: pageInfo.url,
+                title: pageInfo.title,
+                favicon: pageInfo.favicon,
+              });
+              console.log('[Background] Quick add:', pageInfo.url);
+            }
+          } catch (error) {
+            console.error('[Background] Quick add failed:', error);
+          }
+          break;
+
+        case 'toggle-favorite':
+          try {
+            const pageInfo = await getCurrentPageInfo();
+            if (!pageInfo?.url) return;
+
+            // 查找现有书签
+            const bookmarks = await bookmarkService.getAll({ limit: 1000 });
+            const existing = bookmarks.find((b) => b.url === pageInfo.url);
+
+            if (existing) {
+              await bookmarkService.toggleFavorite(existing.id);
+              console.log('[Background] Toggled favorite for:', existing.id);
+            }
+          } catch (error) {
+            console.error('[Background] Toggle favorite failed:', error);
+          }
+          break;
+
+        case 'search-bookmarks':
+          // 打开 sidepanel 并聚焦搜索框
+          if (browser.sidePanel) {
+            const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+            if (tab[0]?.id) {
+              await browser.sidePanel.open({ windowId: tab[0].windowId });
+              // TODO: 发送消息到 sidepanel 聚焦搜索框
+            }
+          }
+          break;
+      }
     });
   }
 

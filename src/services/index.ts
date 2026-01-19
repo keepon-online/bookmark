@@ -6,3 +6,5 @@ export * from './tagService';
 export * from './searchService';
 export * from './aiService';
 export * from './linkHealthService';
+export * from './syncService';
+export * from './semanticSearchService';

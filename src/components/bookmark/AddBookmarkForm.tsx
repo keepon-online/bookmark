@@ -5,6 +5,7 @@ import { Plus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
+import { TagSuggestion } from '@/components/ai';
 import { cn } from '@/lib/utils';
 import { getCurrentPageInfo } from '@/lib/messaging';
 import type { CreateBookmarkDTO } from '@/types';
@@ -146,6 +147,18 @@ export function AddBookmarkForm({ onSubmit, onCancel, className }: AddBookmarkFo
           </div>
         )}
       </div>
+
+      {/* AI 标签建议 */}
+      {(url || title) && (
+        <TagSuggestion
+          bookmark={{ url, title }}
+          existingTags={tags}
+          onAccept={(suggestedTags) => {
+            setTags([...tags, ...suggestedTags]);
+          }}
+          className="mt-2"
+        />
+      )}
 
       {/* Actions */}
       <div className="flex justify-end gap-2 pt-2">

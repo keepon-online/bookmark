@@ -8,3 +8,5 @@ export * from './messages';
 export * from './errors';
 export * from './ai';
 export * from './linkHealth';
+export * from './sync';
+export * from './search';

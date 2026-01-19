@@ -20,6 +20,16 @@ export interface LinkCheck {
   checkedAt: number;
 }
 
+// 嵌入向量记录
+export interface EmbeddingRecord {
+  id: string;
+  bookmarkId: string;
+  embedding: number[];
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // 同步元数据
 export interface SyncMeta {
   id: string;
@@ -36,6 +46,7 @@ export class BookmarkDatabase extends Dexie {
   tags!: Table<Tag>;
   bookmarkTags!: Table<BookmarkTag>;
   linkChecks!: Table<LinkCheck>;
+  embeddings!: Table<EmbeddingRecord>;
   syncMeta!: Table<SyncMeta>;
 
   constructor() {
@@ -54,6 +65,11 @@ export class BookmarkDatabase extends Dexie {
       linkChecks: 'id, bookmarkId, checkedAt',
       // 同步元数据表
       syncMeta: 'id, [entityType+entityId], syncStatus',
+    });
+
+    // 版本 2：添加嵌入向量表
+    this.version(2).stores({
+      embeddings: 'id, bookmarkId, model, createdAt',
     });
   }
 }
@@ -79,6 +95,7 @@ export async function clearDatabase(): Promise<void> {
   await db.tags.clear();
   await db.bookmarkTags.clear();
   await db.linkChecks.clear();
+  await db.embeddings.clear();
   await db.syncMeta.clear();
   console.log('[DB] Database cleared');
 }
