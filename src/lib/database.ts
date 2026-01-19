@@ -2,6 +2,8 @@
 
 import Dexie, { type Table } from 'dexie';
 import type { Bookmark, Folder, Tag } from '@/types';
+import type { OrganizeHistory } from '@/types/organizer';
+import type { StatsCache } from '@/types/stats';
 
 // 书签-标签关联表
 export interface BookmarkTag {
@@ -40,6 +42,25 @@ export interface SyncMeta {
   syncStatus: 'synced' | 'pending' | 'conflict';
 }
 
+// 书签分组
+export interface BookmarkGroupRecord {
+  id: string;
+  name: string;
+  bookmarkIds: string[];
+  similarity: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// 重复检测记录
+export interface DuplicateRecord {
+  id: string;
+  url: string;
+  bookmarkIds: string[];
+  detectedAt: number;
+  resolved: boolean;
+}
+
 export class BookmarkDatabase extends Dexie {
   bookmarks!: Table<Bookmark>;
   folders!: Table<Folder>;
@@ -48,6 +69,10 @@ export class BookmarkDatabase extends Dexie {
   linkChecks!: Table<LinkCheck>;
   embeddings!: Table<EmbeddingRecord>;
   syncMeta!: Table<SyncMeta>;
+  organizeHistory!: Table<OrganizeHistory>;
+  statsCache!: Table<StatsCache>;
+  bookmarkGroups!: Table<BookmarkGroupRecord>;
+  duplicateRecords!: Table<DuplicateRecord>;
 
   constructor() {
     super('SmartBookmarkDB');
@@ -70,6 +95,14 @@ export class BookmarkDatabase extends Dexie {
     // 版本 2：添加嵌入向量表
     this.version(2).stores({
       embeddings: 'id, bookmarkId, model, createdAt',
+    });
+
+    // 版本 3：添加整理和统计相关表
+    this.version(3).stores({
+      organizeHistory: 'id, timestamp',
+      statsCache: 'id, type, createdAt, expiresAt',
+      bookmarkGroups: 'id, name, createdAt',
+      duplicateRecords: 'id, url, detectedAt, resolved',
     });
   }
 }
@@ -97,6 +130,10 @@ export async function clearDatabase(): Promise<void> {
   await db.linkChecks.clear();
   await db.embeddings.clear();
   await db.syncMeta.clear();
+  await db.organizeHistory.clear();
+  await db.statsCache.clear();
+  await db.bookmarkGroups.clear();
+  await db.duplicateRecords.clear();
   console.log('[DB] Database cleared');
 }
 

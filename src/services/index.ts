@@ -8,3 +8,5 @@ export * from './aiService';
 export * from './linkHealthService';
 export * from './syncService';
 export * from './semanticSearchService';
+export * from './organizerService';
+export * from './statsService';

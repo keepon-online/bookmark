@@ -5,8 +5,8 @@ export default defineConfig({
   srcDir: 'src',
   manifest: {
     name: '智能书签',
-    description: 'AI 驱动的智能书签管理插件 - 自动分类、标签推荐、跨设备同步、语义搜索',
-    version: '0.4.0',
+    description: 'AI 驱动的智能书签管理插件 - 自动分类、标签推荐、跨设备同步、语义搜索、智能整理',
+    version: '0.5.0',
     permissions: [
       'bookmarks',
       'storage',

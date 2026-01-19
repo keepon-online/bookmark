@@ -20,6 +20,8 @@ import { Badge } from '@/components/ui/Badge';
 import { HealthReport } from '@/components/linkHealth';
 import { SyncSettings } from '@/components/sync/SyncSettings';
 import { SemanticSearchSettings } from '@/components/semanticSearch/SemanticSearchSettings';
+import { BookmarksOrganizer, DuplicateManager } from '@/components/organizer';
+import { StatsDashboard } from '@/components/stats';
 import { useUIStore, initializeTheme } from '@/stores';
 import { initDatabase, db, exportDatabase, clearDatabase } from '@/lib/database';
 import { bookmarkService } from '@/services';
@@ -135,6 +137,15 @@ export function App() {
         </div>
 
         <div className="grid gap-6">
+          {/* 智能整理 */}
+          <BookmarksOrganizer />
+
+          {/* 重复书签管理 */}
+          <DuplicateManager />
+
+          {/* 数据统计仪表板 */}
+          <StatsDashboard />
+
           {/* 云端同步 */}
           <SyncSettings />
 
@@ -306,7 +317,7 @@ export function App() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">版本</span>
-                  <span>0.4.0 (Beta)</span>
+                  <span>0.5.0 (Beta)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">技术栈</span>
