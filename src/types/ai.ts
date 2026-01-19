@@ -2,8 +2,8 @@
 
 import type { Bookmark } from './bookmark';
 
-export type AIProvider = 'local' | 'openai' | 'claude';
-export type ClassificationMethod = 'rule' | 'nlp' | 'hybrid';
+export type AIProvider = 'local' | 'openai' | 'claude' | 'deepseek';
+export type ClassificationMethod = 'rule' | 'nlp' | 'hybrid' | 'llm';
 
 // 分类结果
 export interface ClassificationResult {
@@ -111,4 +111,68 @@ export interface ClassificationStats {
   accuracy: number;
   mostUsedTags: Array<{ tag: string; count: number }>;
   mostActiveRules: Array<{ ruleId: string; count: number }>;
+}
+
+// DeepSeek 配置
+export interface DeepSeekConfig {
+  apiKey: string;
+  baseURL?: string;
+  model?: 'deepseek-chat' | 'deepseek-coder';
+  enabled?: boolean;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+// LLM 分类结果（扩展）
+export interface LLMClassificationResult extends ClassificationResult {
+  // LLM 特定字段
+  reasoning?: string; // LLM 的推理过程
+  alternativeTags?: string[]; // 备选标签
+  alternativeFolders?: string[]; // 备选文件夹
+  modelUsed?: string; // 使用的模型
+  tokensUsed?: number; // 使用的 token 数量
+  cost?: number; // 成本（元）
+}
+
+// Prompt 模板类型
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  userPromptTemplate: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+// 缓存条目
+export interface ClassificationCache {
+  url: string;
+  title: string;
+  result: LLMClassificationResult;
+  timestamp: number;
+  expiresAt: number;
+  hitCount: number;
+}
+
+// 批量分类选项
+export interface BatchClassifyOptions {
+  batchSize?: number; // 批处理大小
+  useCache?: boolean; // 是否使用缓存
+  onProgress?: (current: number, total: number) => void; // 进度回调
+  fallbackToLocal?: boolean; // 失败时是否回退到本地分类
+}
+
+// 成本统计
+export interface CostStats {
+  totalTokens: number;
+  totalCost: number; // 总成本（元）
+  classifyCount: number;
+  avgCostPerClassify: number;
+  dailyStats: Array<{
+    date: string;
+    tokens: number;
+    cost: number;
+    count: number;
+  }>;
 }

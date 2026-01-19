@@ -22,6 +22,7 @@ import { SyncSettings } from '@/components/sync/SyncSettings';
 import { SemanticSearchSettings } from '@/components/semanticSearch/SemanticSearchSettings';
 import { BookmarksOrganizer, DuplicateManager } from '@/components/organizer';
 import { StatsDashboard } from '@/components/stats';
+import { DeepSeekConfig } from '@/components/ai';
 import { useUIStore, initializeTheme } from '@/stores';
 import { initDatabase, db, exportDatabase, clearDatabase } from '@/lib/database';
 import { bookmarkService } from '@/services';
@@ -126,7 +127,7 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container max-w-4xl mx-auto py-8 px-4">
+      <div className="container max-w-7xl mx-auto py-8 px-4">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
           <Settings className="h-8 w-8 text-primary" />
@@ -137,6 +138,9 @@ export function App() {
         </div>
 
         <div className="grid gap-6">
+          {/* DeepSeek AI 配置 */}
+          <DeepSeekConfig />
+
           {/* 智能整理 */}
           <BookmarksOrganizer />
 

@@ -1,6 +1,6 @@
 // 书签整理工具组件
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Wand2,
   Eye,
@@ -10,14 +10,23 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  Clock,
+  RefreshCw,
 } from 'lucide-react';
-import { organizerService } from '@/services';
+import { organizerService, browserSyncService } from '@/services';
 import type {
   OrganizeOptions,
   OrganizeProgress,
   OrganizePreview,
   OrganizeResult,
 } from '@/types';
+
+interface AutoOrganizeConfig {
+  enabled: boolean;
+  strategy: 'auto' | 'conservative' | 'aggressive';
+  minConfidence: number;
+  schedule: 'daily' | 'weekly';
+}
 
 interface BookmarksOrganizerProps {
   className?: string;
@@ -39,12 +48,59 @@ export function BookmarksOrganizer({
     handleBroken: 'ignore',
   });
 
+  const [autoOrganizeConfig, setAutoOrganizeConfig] = useState<AutoOrganizeConfig>({
+    enabled: false,
+    strategy: 'auto',
+    minConfidence: 0.7,
+    schedule: 'daily',
+  });
+
   const [progress, setProgress] = useState<OrganizeProgress | null>(null);
   const [preview, setPreview] = useState<OrganizePreview | null>(null);
   const [result, setResult] = useState<OrganizeResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
+  const [lastAutoOrganize, setLastAutoOrganize] = useState<string | null>(null);
+  const [syncToBrowser, setSyncToBrowser] = useState(true); // 默认同步到浏览器
+  const [syncResult, setSyncResult] = useState<{ moved: number; tagged: number } | null>(null);
+  const [lastOrganizeTime, setLastOrganizeTime] = useState<string | null>(null);
+
+  // 加载自动整理配置和上次的整理结果
+  useEffect(() => {
+    loadAutoOrganizeConfig();
+    loadLastOrganizeResult();
+  }, []);
+
+  const loadAutoOrganizeConfig = async () => {
+    const stored = await chrome.storage.local.get('autoOrganizeConfig');
+    if (stored.autoOrganizeConfig) {
+      setAutoOrganizeConfig(stored.autoOrganizeConfig);
+    }
+
+    const lastRun = await chrome.storage.local.get('lastAutoOrganize');
+    if (lastRun.lastAutoOrganize) {
+      setLastAutoOrganize(new Date(lastRun.lastAutoOrganize).toLocaleString());
+    }
+  };
+
+  const loadLastOrganizeResult = async () => {
+    const stored = await chrome.storage.local.get(['lastOrganizeResult', 'lastSyncResult', 'lastOrganizeTime']);
+    if (stored.lastOrganizeResult) {
+      setResult(stored.lastOrganizeResult);
+    }
+    if (stored.lastSyncResult) {
+      setSyncResult(stored.lastSyncResult);
+    }
+    if (stored.lastOrganizeTime) {
+      setLastOrganizeTime(new Date(stored.lastOrganizeTime).toLocaleString());
+    }
+  };
+
+  const saveAutoOrganizeConfig = async (config: AutoOrganizeConfig) => {
+    setAutoOrganizeConfig(config);
+    await chrome.storage.local.set({ autoOrganizeConfig: config });
+  };
 
   // 生成预览
   const handlePreview = async () => {
@@ -69,14 +125,48 @@ export function BookmarksOrganizer({
     setProgress(null);
     setResult(null);
     setShowPreview(false);
+    setSyncResult(null);
 
     try {
+      // 1. 在扩展中整理书签
       const resultData = await organizerService.organizeAll(options, (prog) => {
         setProgress(prog);
       });
 
       setResult(resultData);
       onComplete?.(resultData);
+
+      // 更新时间
+      setLastOrganizeTime(new Date().toLocaleString());
+
+      // 保存整理结果到存储
+      await chrome.storage.local.set({
+        lastOrganizeResult: resultData,
+        lastOrganizeTime: Date.now(),
+      });
+
+      // 2. 如果启用同步，将整理结果同步到浏览器书签栏
+      if (syncToBrowser && resultData.success) {
+        setProgress({ current: 0, total: 100, message: '正在同步到浏览器书签栏...' });
+
+        const syncData = await browserSyncService.syncToBrowser({
+          moveBookmarks: options.moveBookmarks,
+          applyTags: options.applyTags,
+        });
+
+        const syncResultData = { moved: syncData.moved, tagged: syncData.tagged };
+
+        if (syncData.success) {
+          setSyncResult(syncResultData);
+          // 保存同步结果到存储
+          await chrome.storage.local.set({
+            lastSyncResult: syncResultData,
+          });
+          console.log('[Organizer] Browser sync completed:', syncData);
+        } else {
+          console.error('[Organizer] Browser sync failed:', syncData.errors);
+        }
+      }
     } catch (error) {
       console.error('整理失败:', error);
     } finally {
@@ -215,6 +305,19 @@ export function BookmarksOrganizer({
               />
               <span className="text-sm text-gray-700">归档无法分类的书签</span>
             </label>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={syncToBrowser}
+                onChange={(e) => setSyncToBrowser(e.target.checked)}
+                className="rounded border-gray-300 text-indigo-600"
+              />
+              <span className="text-sm text-gray-700 flex items-center gap-1">
+                <RefreshCw className="w-3 h-3" />
+                同步到浏览器书签栏
+              </span>
+            </label>
           </div>
 
           {/* 失效链接处理 */}
@@ -241,6 +344,112 @@ export function BookmarksOrganizer({
           )}
         </div>
       )}
+
+      {/* 自动整理配置 */}
+      <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-purple-600" />
+            <h4 className="font-medium text-gray-900">自动整理</h4>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoOrganizeConfig.enabled}
+              onChange={(e) =>
+                saveAutoOrganizeConfig({
+                  ...autoOrganizeConfig,
+                  enabled: e.target.checked,
+                })
+              }
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+          </label>
+        </div>
+
+        {autoOrganizeConfig.enabled && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              自动为新添加的书签进行分类和打标签，无需手动操作
+            </p>
+
+            {/* 整理策略 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                整理策略
+              </label>
+              <select
+                value={autoOrganizeConfig.strategy}
+                onChange={(e) =>
+                  saveAutoOrganizeConfig({
+                    ...autoOrganizeConfig,
+                    strategy: e.target.value as any,
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="auto">自动（推荐）</option>
+                <option value="conservative">保守（仅高置信度）</option>
+                <option value="aggressive">激进（包含低置信度）</option>
+              </select>
+            </div>
+
+            {/* 置信度阈值 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                最低置信度: {Math.round(autoOrganizeConfig.minConfidence * 100)}%
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={autoOrganizeConfig.minConfidence}
+                onChange={(e) =>
+                  saveAutoOrganizeConfig({
+                    ...autoOrganizeConfig,
+                    minConfidence: parseFloat(e.target.value),
+                  })
+                }
+                className="w-full"
+              />
+            </div>
+
+            {/* 整理频率 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                整理频率
+              </label>
+              <select
+                value={autoOrganizeConfig.schedule}
+                onChange={(e) =>
+                  saveAutoOrganizeConfig({
+                    ...autoOrganizeConfig,
+                    schedule: e.target.value as any,
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="daily">每天</option>
+                <option value="weekly">每周</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                {autoOrganizeConfig.schedule === 'daily'
+                  ? '每天凌晨 2 点自动整理所有书签'
+                  : '每周日凌晨 2 点自动整理所有书签'}
+              </p>
+            </div>
+
+            {/* 上次整理时间 */}
+            {lastAutoOrganize && (
+              <div className="text-xs text-gray-500">
+                上次自动整理: {lastAutoOrganize}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* 进度显示 */}
       {progress && (
@@ -379,10 +588,42 @@ export function BookmarksOrganizer({
           )}
 
           {result.success && (
-            <div className="mt-3 text-sm text-gray-600">
-              耗时: {(result.duration / 1000).toFixed(2)} 秒
+            <div className="mt-3 space-y-1 text-sm text-gray-600">
+              <div>耗时: {(result.duration / 1000).toFixed(2)} 秒</div>
+              {lastOrganizeTime && (
+                <div>整理时间: {lastOrganizeTime}</div>
+              )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* 同步结果 */}
+      {syncResult && (
+        <div className="mb-6 p-4 bg-indigo-50 rounded-lg">
+          <div className="flex items-center gap-2 mb-3">
+            <RefreshCw className="w-5 h-5 text-indigo-600" />
+            <span className="font-medium text-indigo-900">浏览器同步完成</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="text-center p-2 bg-white rounded">
+              <div className="text-lg font-semibold text-indigo-600">
+                {syncResult.moved}
+              </div>
+              <div className="text-xs text-gray-500">已移动到文件夹</div>
+            </div>
+            <div className="text-center p-2 bg-white rounded">
+              <div className="text-lg font-semibold text-indigo-600">
+                {syncResult.tagged}
+              </div>
+              <div className="text-xs text-gray-500">已添加标签</div>
+            </div>
+          </div>
+
+          <div className="mt-3 text-sm text-indigo-700">
+            ✨ 书签已在浏览器书签栏中更新，打开书签管理器查看效果
+          </div>
         </div>
       )}
 

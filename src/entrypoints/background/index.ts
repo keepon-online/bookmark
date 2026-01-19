@@ -2,7 +2,7 @@
 
 import { initDatabase } from '@/lib/database';
 import { onMessage, getCurrentPageInfo } from '@/lib/messaging';
-import { bookmarkService, folderService, tagService, searchService } from '@/services';
+import { bookmarkService, folderService, tagService, searchService, organizerService, browserSyncService } from '@/services';
 import type { Message, MessageResponse, CreateBookmarkDTO, UpdateBookmarkDTO } from '@/types';
 
 export default defineBackground(() => {
@@ -50,6 +50,11 @@ export default defineBackground(() => {
     // 清理未使用标签 - 每周
     browser.alarms.create('cleanup-tags', {
       periodInMinutes: 60 * 24 * 7,
+    });
+
+    // 自动整理书签 - 每天凌晨 2 点执行
+    browser.alarms.create('auto-organize', {
+      periodInMinutes: 60 * 24,
     });
   }
 
@@ -158,6 +163,43 @@ export default defineBackground(() => {
           console.log('[Background] Cleaned up', count, 'unused tags');
         } catch (error) {
           console.error('[Background] Failed to cleanup tags:', error);
+        }
+        break;
+
+      case 'auto-organize':
+        console.log('[Background] Running auto-organize...');
+        try {
+          // 检查是否启用了自动整理
+          const config = await chrome.storage.local.get('autoOrganizeConfig');
+          if (config.autoOrganizeConfig?.enabled) {
+            const result = await organizerService.organizeAll({
+              strategy: config.autoOrganizeConfig.strategy || 'auto',
+              createNewFolders: true,
+              applyTags: true,
+              moveBookmarks: false, // 自动整理不移动书签，只分类
+              removeDuplicates: false,
+              minConfidence: config.autoOrganizeConfig.minConfidence || 0.7,
+              archiveUncategorized: false,
+              handleBroken: 'ignore',
+            });
+
+            console.log('[Background] Auto-organize completed:', result);
+
+            // 同步到浏览器书签栏
+            try {
+              const syncResult = await browserSyncService.syncToBrowser({
+                moveBookmarks: false, // 自动整理不移动
+                applyTags: true, // 应用标签
+              });
+              console.log('[Background] Browser sync completed:', syncResult);
+            } catch (syncError) {
+              console.error('[Background] Browser sync failed:', syncError);
+            }
+          } else {
+            console.log('[Background] Auto-organize is disabled');
+          }
+        } catch (error) {
+          console.error('[Background] Auto-organize failed:', error);
         }
         break;
     }

@@ -2,6 +2,8 @@
 
 import { db } from '@/lib/database';
 import { generateId, now, normalizeUrl, isValidUrl, getFaviconUrl } from '@/lib/utils';
+import { aiService } from './aiService';
+import { folderService } from './folderService';
 import type {
   Bookmark,
   CreateBookmarkDTO,
@@ -12,7 +14,7 @@ import type {
 
 export class BookmarkService {
   // 创建书签
-  async create(dto: CreateBookmarkDTO): Promise<Bookmark> {
+  async create(dto: CreateBookmarkDTO, autoClassify = true): Promise<Bookmark> {
     if (!isValidUrl(dto.url)) {
       throw new Error('Invalid URL');
     }
@@ -44,6 +46,43 @@ export class BookmarkService {
     };
 
     await db.bookmarks.add(bookmark);
+
+    // 自动分类（如果启用且未指定文件夹/标签）
+    if (autoClassify && (!dto.folderId || !dto.tags || dto.tags.length === 0)) {
+      try {
+        const classification = await aiService.classifyBookmark(bookmark);
+
+        // 应用 AI 推荐的标签
+        if (classification.suggestedTags.length > 0 && (!dto.tags || dto.tags.length === 0)) {
+          const newTags = [...new Set([...bookmark.tags, ...classification.suggestedTags])];
+          bookmark.tags = newTags;
+          bookmark.aiGenerated = true;
+
+          // 更新到数据库
+          await db.bookmarks.update(bookmark.id, { tags: newTags, aiGenerated: true });
+
+          // 更新标签使用计数
+          await this.updateTagUsageCount(newTags, 1);
+        }
+
+        // 应用 AI 推荐的文件夹
+        if (classification.suggestedFolder && !dto.folderId && classification.confidence >= 0.7) {
+          const folderId = await this.getOrCreateFolder(classification.suggestedFolder);
+          if (folderId) {
+            bookmark.folderId = folderId;
+            bookmark.aiGenerated = true;
+
+            // 更新到数据库
+            await db.bookmarks.update(bookmark.id, { folderId });
+          }
+        }
+
+        bookmark.updatedAt = now();
+      } catch (error) {
+        console.error('[Bookmark] Auto-classification failed:', error);
+        // 不影响书签创建，只是记录错误
+      }
+    }
 
     // 更新标签使用计数
     if (bookmark.tags.length > 0) {
@@ -421,6 +460,41 @@ export class BookmarkService {
           createdAt: now(),
         });
       }
+    }
+  }
+
+  // 获取或创建文件夹（用于自动分类）
+  private async getOrCreateFolder(folderPath: string): Promise<string | undefined> {
+    try {
+      const parts = folderPath.split('/').filter(Boolean);
+      let parentId: string | undefined = undefined;
+
+      for (const part of parts) {
+        // 查找现有文件夹
+        const existing = await db.folders
+          .where('name')
+          .equals(part)
+          .and((f) => f.parentId === parentId)
+          .first();
+
+        if (existing) {
+          parentId = existing.id;
+        } else {
+          // 创建新文件夹
+          const newFolder = await folderService.create({
+            name: part,
+            parentId,
+            order: 0,
+            isSmartFolder: false,
+          });
+          parentId = newFolder.id;
+        }
+      }
+
+      return parentId;
+    } catch (error) {
+      console.error('[Bookmark] Failed to get or create folder:', error);
+      return undefined;
     }
   }
 
