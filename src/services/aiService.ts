@@ -180,12 +180,36 @@ export class AIService {
     const keywords = this.extractKeywordsFromBookmark(bookmark);
     const suggestedTags = this.generateTagsFromKeywords(keywords, contentType);
 
+    // 根据内容类型生成建议文件夹
+    const suggestedFolder = this.generateFolderFromContentType(contentType, suggestedTags);
+
     return {
+      suggestedFolder,
       suggestedTags,
       contentType,
       confidence: 0.5, // 基础推荐的置信度较低
       method: 'rule',
     };
+  }
+
+  /**
+   * 根据内容类型生成建议文件夹
+   */
+  private generateFolderFromContentType(contentType: ContentType, tags: string[]): string | undefined {
+    const folderMap: Record<ContentType, string> = {
+      article: '学习/文章',
+      video: '娱乐/视频',
+      documentation: '开发/文档',
+      tool: '工具',
+      social: '社交',
+      shopping: '购物',
+      repository: '开发/代码库',
+      blog: '学习/博客',
+      forum: '开发/问答',
+      other: undefined,
+    };
+
+    return folderMap[contentType];
   }
 
   /**

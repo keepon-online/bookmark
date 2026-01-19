@@ -6,7 +6,7 @@ export default defineConfig({
   manifest: {
     name: '智能书签',
     description: 'AI 驱动的智能书签管理插件 - 自动分类、标签推荐、跨设备同步、语义搜索、智能整理',
-    version: '0.5.0',
+    version: '0.5.1',
     permissions: [
       'bookmarks',
       'storage',
@@ -19,6 +19,10 @@ export default defineConfig({
       'https://*/*',
       'http://*/*'
     ],
+    options_ui: {
+      page: 'options.html',
+      open_in_tab: true
+    },
     icons: {
       16: 'icons/icon16.png',
       48: 'icons/icon48.png',
@@ -57,6 +61,14 @@ export default defineConfig({
         },
         description: '搜索书签',
       },
+    },
+  },
+  hooks: {
+    'build:manifestGenerated': (wxt, manifest) => {
+      // 确保 options_ui 包含 open_in_tab
+      if (manifest.options_ui) {
+        (manifest.options_ui as any).open_in_tab = true;
+      }
     },
   },
 });

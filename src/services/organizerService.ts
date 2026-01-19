@@ -100,7 +100,10 @@ export class OrganizerService {
             if (opts.applyTags && classification.suggestedTags.length > 0) {
               const newTags = [...new Set([...bookmark.tags, ...classification.suggestedTags])];
               if (newTags.length > bookmark.tags.length) {
-                await bookmarkService.update(bookmark.id, { tags: newTags });
+                await bookmarkService.update(bookmark.id, {
+                  tags: newTags,
+                  aiGenerated: true  // 标记为 AI 生成
+                });
                 result.tagged++;
 
                 changes.push({
@@ -126,7 +129,10 @@ export class OrganizerService {
               );
 
               if (folderId && folderId !== bookmark.folderId) {
-                await bookmarkService.update(bookmark.id, { folderId: folderId });
+                await bookmarkService.update(bookmark.id, {
+                  folderId: folderId,
+                  aiGenerated: true  // 标记为 AI 生成
+                });
                 result.moved++;
 
                 changes.push({
