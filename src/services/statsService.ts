@@ -35,26 +35,25 @@ export class StatsService {
       if (cached) return cached.data as OverallStats;
     }
 
-    const [
-      totalBookmarks,
-      totalFolders,
-      totalTags,
-      favorites,
-      archived,
-      broken,
-      uncategorized,
-      bookmarks,
-      folders,
-    ] = await Promise.all([
+    // 先获取基础数据
+    const [totalBookmarks, totalFolders, bookmarks, folders] = await Promise.all([
       db.bookmarks.count(),
       db.folders.count(),
-      db.tags.count(),
+      db.bookmarks.toArray(),
+      db.folders.toArray(),
+    ]);
+
+    // 统计标签数（从 bookmarks.tags 字段）
+    const tagSet = new Set<string>();
+    bookmarks.forEach(b => b.tags.forEach(tag => tagSet.add(tag)));
+    const totalTags = tagSet.size;
+
+    // 统计其他数据
+    const [favorites, archived, broken, uncategorized] = await Promise.all([
       db.bookmarks.where('isFavorite').equals(1).count(),
       db.bookmarks.where('isArchived').equals(1).count(),
       db.bookmarks.where('status').equals('broken').count(),
-      db.bookmarks.where('folderId').equals('').count(),
-      db.bookmarks.toArray(),
-      db.folders.toArray(),
+      db.bookmarks.where('folderId').equals('').or('undefined').or('null').count(),
     ]);
 
     // 计算重复书签数
