@@ -244,12 +244,27 @@ export function EmptyFolderCleanup({
                   formatAge(info.age)
                 )
               ),
-              info.allDescendantsCount > 0 ? React.createElement('div', { className: 'text-xs text-gray-500' },
+              info.allDescendantsCount > 0 ? React.createElement('div', {
+                className: 'text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded font-medium'
+              },
                 `包含 ${info.allDescendantsCount} 个子文件夹`
               ) : null
             )
           )
-        )
+        ),
+
+        // 添加说明：递归删除会同时删除子文件夹
+        preview.toDelete.some(info => info.allDescendantsCount > 0) ? React.createElement('div', {
+          className: 'bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3'
+        },
+          React.createElement('div', { className: 'flex items-start gap-2' },
+            React.createElement(Info, { className: 'w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5' }),
+            React.createElement('div', { className: 'text-sm text-blue-800' },
+              React.createElement('div', { className: 'font-medium mb-1' }, '递归删除说明'),
+              '删除包含子文件夹的父文件夹时，会同时删除所有空的子文件夹。例如：删除"技术/前端/React"时，如果"技术"和"前端"也是空的，会一并删除。'
+            )
+          )
+        ) : null
       ) : null,
 
       // 将被保留的文件夹列表

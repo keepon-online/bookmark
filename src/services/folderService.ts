@@ -323,8 +323,8 @@ export class FolderService {
       const allDescendantsCount = recursive ? calculateDescendants(folder.id) : directChildrenCount;
       const age = now - folder.createdAt;
 
-      // 判断是否为空
-      const isEmpty = bookmarksCount === 0 && (recursive ? allDescendantsCount === 0 : true);
+      // 判断是否为空（只要文件夹本身没有书签即可，子文件夹会在递归删除时一起处理）
+      const isEmpty = bookmarksCount === 0;
 
       // 应用最小存在时间过滤
       if (isEmpty && age < minAge) continue;
@@ -349,25 +349,20 @@ export class FolderService {
   private async shouldKeepFolder(
     info: EmptyFolderInfo
   ): Promise<{ reason: string } | { reason?: never }> {
-    const { folder, allDescendantsCount, age } = info;
+    const { folder, age } = info;
 
     // 1. 检查是否是智能文件夹
     if (folder.isSmartFolder) {
       return { reason: '智能文件夹需要保留' };
     }
 
-    // 2. 检查是否有子文件夹（非递归模式）
-    if (allDescendantsCount > 0) {
-      return { reason: `包含 ${allDescendantsCount} 个子文件夹` };
-    }
-
-    // 3. 检查是否是系统文件夹（如"收藏"、"未分类"）
+    // 2. 检查是否是系统文件夹（如"收藏"、"未分类"）
     const systemFolders = ['收藏', '未分类', '全部', '最近使用'];
     if (systemFolders.includes(folder.name)) {
       return { reason: '系统文件夹需要保留' };
     }
 
-    // 4. 检查文件夹是否太新（防止误删刚创建的）
+    // 3. 检查文件夹是否太新（防止误删刚创建的）
     const ONE_DAY = 24 * 60 * 60 * 1000;
     if (age < ONE_DAY) {
       return { reason: '创建时间小于24小时' };
