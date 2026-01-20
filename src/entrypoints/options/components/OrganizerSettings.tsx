@@ -1,7 +1,7 @@
 // 智能整理设置页面
 
 import * as React from 'react';
-import { BookmarksOrganizer, DuplicateManager } from '@/components/organizer';
+import { BookmarksOrganizer, DuplicateManager, EmptyFolderCleanup } from '@/components/organizer';
 
 export function OrganizerSettings() {
   return React.createElement('div', { className: 'space-y-6' },
@@ -12,6 +12,11 @@ export function OrganizerSettings() {
 
     // 重复书签管理
     React.createElement(DuplicateManager, {
+      className: 'mt-6',
+    }),
+
+    // 清理空文件夹
+    React.createElement(EmptyFolderCleanup, {
       className: 'mt-6',
     })
   );
