@@ -471,11 +471,8 @@ export class BookmarkService {
 
       for (const part of parts) {
         // 查找现有文件夹
-        const existing = await db.folders
-          .where('name')
-          .equals(part)
-          .and((f) => f.parentId === parentId)
-          .first();
+        const allFolders = await db.folders.toArray();
+        const existing = allFolders.find(f => f.name === part && f.parentId === parentId);
 
         if (existing) {
           parentId = existing.id;

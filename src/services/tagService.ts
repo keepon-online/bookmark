@@ -40,7 +40,8 @@ export class TagService {
       }
 
       // 更新所有书签中的标签名
-      const bookmarks = await db.bookmarks.where('tags').equals(tag.name).toArray();
+      const allBookmarks = await db.bookmarks.toArray();
+      const bookmarks = allBookmarks.filter(b => b.tags.includes(tag.name));
       for (const bookmark of bookmarks) {
         const newTags = bookmark.tags.map((t) => (t === tag.name ? dto.name : t));
         await db.bookmarks.update(bookmark.id, { tags: newTags });

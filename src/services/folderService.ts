@@ -8,18 +8,16 @@ export class FolderService {
   // 创建文件夹
   async create(dto: CreateFolderDTO): Promise<Folder> {
     // 检查同名文件夹
-    const existing = await db.folders
-      .where('name')
-      .equals(dto.name)
-      .and((f) => f.parentId === dto.parentId)
-      .first();
+    const allFolders = await db.folders.toArray();
+    const existing = allFolders.find(f => f.name === dto.name && f.parentId === dto.parentId);
 
     if (existing) {
       throw new Error('Folder with this name already exists');
     }
 
     // 获取排序顺序
-    const siblings = await db.folders.where('parentId').equals(dto.parentId || '').toArray();
+    const allSiblings = await db.folders.toArray();
+    const siblings = allSiblings.filter(f => f.parentId === dto.parentId);
     const maxOrder = siblings.reduce((max, f) => Math.max(max, f.order), -1);
 
     const folder: Folder = {
@@ -48,11 +46,8 @@ export class FolderService {
     // 如果更改名称，检查同名文件夹
     if (dto.name && dto.name !== folder.name) {
       const parentId = dto.parentId !== undefined ? dto.parentId : folder.parentId;
-      const existing = await db.folders
-        .where('name')
-        .equals(dto.name)
-        .and((f) => f.parentId === parentId && f.id !== id)
-        .first();
+      const allFolders = await db.folders.toArray();
+      const existing = allFolders.find(f => f.name === dto.name && f.parentId === parentId && f.id !== id);
 
       if (existing) {
         throw new Error('Folder with this name already exists');
@@ -189,11 +184,8 @@ export class FolderService {
     movedId: string,
     newOrder: number
   ): Promise<void> {
-    const siblings = await db.folders
-      .where('parentId')
-      .equals(parentId || '')
-      .and((f) => f.id !== movedId)
-      .toArray();
+    const allSiblings = await db.folders.toArray();
+    const siblings = allSiblings.filter(f => f.parentId === parentId && f.id !== movedId);
 
     // 按当前顺序排序
     siblings.sort((a, b) => a.order - b.order);

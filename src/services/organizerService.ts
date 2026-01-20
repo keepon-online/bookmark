@@ -445,10 +445,8 @@ export class OrganizerService {
       // 归档长期未访问的书签
       if (options.archiveUnused) {
         const cutoffDate = Date.now() - options.unusedDays * 24 * 60 * 60 * 1000;
-        const unused = await db.bookmarks
-          .where('lastVisited')
-          .below(cutoffDate)
-          .toArray();
+        const allBookmarks = await db.bookmarks.toArray();
+        const unused = allBookmarks.filter(b => b.lastVisited && b.lastVisited < cutoffDate);
 
         for (const bookmark of unused) {
           if (!bookmark.isArchived) {
@@ -613,11 +611,9 @@ export class OrganizerService {
     for (const part of parts) {
       if (!part) continue;
 
-      const existing = await db.folders
-        .where('name')
-        .equals(part)
-        .and((f) => f.parentId === parentId)
-        .first();
+      // 查找或创建文件夹
+      const allFolders = await db.folders.toArray();
+      const existing = allFolders.find(f => f.name === part && f.parentId === parentId);
 
       if (existing) {
         parentId = existing.id;

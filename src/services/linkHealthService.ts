@@ -82,10 +82,8 @@ export class LinkHealthService {
     // 过滤最近检查过的
     if (skipRecentHours > 0) {
       const cutoffTime = Date.now() - skipRecentHours * 60 * 60 * 1000;
-      const recentChecks = await db.linkChecks
-        .where('checkedAt')
-        .above(cutoffTime)
-        .toArray();
+      const allChecks = await db.linkChecks.toArray();
+      const recentChecks = allChecks.filter(c => c.checkedAt && c.checkedAt > cutoffTime);
       const recentBookmarkIds = new Set(recentChecks.map((c) => c.bookmarkId));
       bookmarks = bookmarks.filter((b) => !recentBookmarkIds.has(b.id));
     }
@@ -179,7 +177,8 @@ export class LinkHealthService {
     options: BatchCheckOptions = {},
     onProgress?: (progress: CheckProgress) => void
   ): Promise<LinkHealthReport> {
-    const bookmarks = await db.bookmarks.where('isArchived').equals(0).toArray();
+    const allBookmarks = await db.bookmarks.toArray();
+    const bookmarks = allBookmarks.filter(b => !b.isArchived);
     const bookmarkIds = bookmarks.map((b) => b.id);
 
     const results = await this.checkBatch(bookmarkIds, options, onProgress);
@@ -301,7 +300,8 @@ export class LinkHealthService {
    */
   async cleanupOldRecords(daysToKeep = 30): Promise<number> {
     const cutoffTime = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
-    const oldRecords = await db.linkChecks.where('checkedAt').below(cutoffTime).toArray();
+    const allRecords = await db.linkChecks.toArray();
+    const oldRecords = allRecords.filter(r => r.checkedAt && r.checkedAt < cutoffTime);
     const ids = oldRecords.map((r) => r.id);
     await db.linkChecks.bulkDelete(ids);
     return ids.length;

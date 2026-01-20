@@ -111,8 +111,9 @@ export function DebugPanel() {
         setOrganizeProgress('同步到浏览器...');
 
         // 统计要同步的书签
-        const withTags = await db.bookmarks.where('tags').notEqual([]).count();
-        const withFolder = await db.bookmarks.where('folderId').above('').count();
+        const allBookmarks = await db.bookmarks.toArray();
+        const withTags = allBookmarks.filter(b => b.tags && b.tags.length > 0).length;
+        const withFolder = allBookmarks.filter(b => b.folderId).length;
         syncLog.push(`准备同步: ${withTags} 个有标签, ${withFolder} 个有文件夹`);
         setSyncLog([...syncLog]);
 

@@ -49,12 +49,14 @@ export class StatsService {
     const totalTags = tagSet.size;
 
     // 统计其他数据
-    const [favorites, archived, broken, uncategorized] = await Promise.all([
+    const [favorites, archived, broken] = await Promise.all([
       db.bookmarks.where('isFavorite').equals(1).count(),
       db.bookmarks.where('isArchived').equals(1).count(),
       db.bookmarks.where('status').equals('broken').count(),
-      db.bookmarks.where('folderId').equals('').or('undefined').or('null').count(),
     ]);
+
+    // uncategorized 需要单独用 filter 处理
+    const uncategorized = bookmarks.filter(b => !b.folderId || b.folderId === '' || b.folderId === 'null' || b.folderId === 'undefined').length;
 
     // 计算重复书签数
     const urlMap = new Map<string, number>();
@@ -257,16 +259,42 @@ export class StatsService {
     const cached = this.getFromCache(cacheKey);
     if (cached) return cached.data as FolderStats[];
 
-    const folders = await folderService.getTree();
+    const folderTree = await folderService.getTree();
     const bookmarks = await db.bookmarks.toArray();
+
+    console.log('📂 调试文件夹统计:', {
+      foldersCount: folderTree.length,
+      bookmarksCount: bookmarks.length,
+      sampleBookmarks: bookmarks.slice(0, 3).map(b => ({ id: b.id, title: b.title, folderId: b.folderId })),
+      sampleFolders: folderTree.slice(0, 3).map(f => ({ id: f.id, name: f.name })),
+    });
+
+    // 将树形结构扁平化
+    const flattenFolders = (nodes: any[]): any[] => {
+      const result: any[] = [];
+      for (const node of nodes) {
+        result.push(node);
+        if (node.children && node.children.length > 0) {
+          result.push(...flattenFolders(node.children));
+        }
+      }
+      return result;
+    };
+
+    const allFolders = flattenFolders(folderTree);
+
+    console.log('📂 扁平化后的文件夹:', {
+      count: allFolders.length,
+      folders: allFolders.map(f => ({ id: f.id, name: f.name, parentId: f.parentId })),
+    });
 
     const stats: FolderStats[] = [];
 
-    for (const folder of folders) {
+    for (const folder of allFolders) {
       const folderBookmarks = bookmarks.filter((b) => b.folderId === folder.id);
 
       // 计算子文件夹数
-      const subfolderCount = folders.filter((f) => f.parentId === folder.id).length;
+      const subfolderCount = allFolders.filter((f) => f.parentId === folder.id).length;
 
       // 计算平均访问次数
       const totalVisits = folderBookmarks.reduce((sum, b) => sum + b.visitCount, 0);
@@ -279,7 +307,7 @@ export class StatsService {
       );
 
       // 计算深度
-      const depth = this.calculateFolderDepth(folder.id, folders);
+      const depth = this.calculateFolderDepth(folder.id, allFolders);
 
       // 计算增长率（简化：基于最近30天新增）
       const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -292,7 +320,7 @@ export class StatsService {
       stats.push({
         folderId: folder.id,
         name: folder.name,
-        path: this.getFolderPath(folder.id, folders),
+        path: this.getFolderPath(folder.id, allFolders),
         bookmarkCount: folderBookmarks.length,
         subfolderCount,
         avgVisits: Math.round(avgVisits * 10) / 10,

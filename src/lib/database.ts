@@ -104,6 +104,21 @@ export class BookmarkDatabase extends Dexie {
       bookmarkGroups: 'id, name, createdAt',
       duplicateRecords: 'id, url, detectedAt, resolved',
     });
+
+    // 版本 4：添加 aiGenerated 索引
+    this.version(4).stores({
+      bookmarks: 'id, url, title, folderId, createdAt, isFavorite, status, isArchived, aiGenerated, [folderId+createdAt]',
+      folders: 'id, name, parentId, order, [parentId+order]',
+      tags: 'id, &name, usageCount',
+      bookmarkTags: '[bookmarkId+tagId], bookmarkId, tagId',
+      linkChecks: 'id, bookmarkId, checkedAt',
+      syncMeta: 'id, [entityType+entityId], syncStatus',
+      organizeHistory: 'id, timestamp',
+      statsCache: 'id, type, createdAt, expiresAt',
+      bookmarkGroups: 'id, name, createdAt',
+      duplicateRecords: 'id, url, detectedAt, resolved',
+      embeddings: 'id, bookmarkId, model, createdAt',
+    });
   }
 }
 

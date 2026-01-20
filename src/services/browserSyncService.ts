@@ -84,27 +84,47 @@ export class BrowserSyncService {
     result: SyncResult
   ): Promise<void> {
     // 1. 在浏览器中找到对应的书签
-    const browserBookmark = this.findBrowserBookmark(bookmark.url);
+    let browserBookmark = this.findBrowserBookmark(bookmark.url);
+
+    // 如果浏览器中没有这个书签，创建它
     if (!browserBookmark) {
-      console.log(`[BrowserSync] Browser bookmark not found for: ${bookmark.url}`);
-      return;
-    }
+      console.log(`[BrowserSync] Creating new browser bookmark for: ${bookmark.url}`);
 
-    // 2. 应用标签（通过修改标题添加标签前缀）
-    if (options.applyTags && bookmark.tags.length > 0) {
-      await this.applyTagsToBrowserBookmark(browserBookmark, bookmark.tags);
-      result.tagged++;
-    }
-
-    // 3. 移动到目标文件夹
-    if (options.moveBookmarks) {
+      // 获取或创建目标文件夹
       const targetFolderId = await this.getOrCreateBrowserFolder(bookmark);
-      if (targetFolderId && targetFolderId !== browserBookmark.parentId) {
-        await chrome.bookmarks.move(browserBookmark.id, {
-          parentId: targetFolderId,
-        });
-        result.moved++;
-        console.log(`[BrowserSync] Moved "${bookmark.title}" to folder ${targetFolderId}`);
+      const parentId = targetFolderId || '1'; // 默认添加到书签栏
+
+      // 创建新书签
+      const titleWithTags = options.applyTags && bookmark.tags.length > 0
+        ? `${bookmark.tags.map((t) => `[${t}]`).join(' ')} ${bookmark.title}`
+        : bookmark.title;
+
+      const newBookmark = await chrome.bookmarks.create({
+        parentId,
+        title: titleWithTags,
+        url: bookmark.url,
+      });
+
+      browserBookmark = newBookmark;
+      result.moved++;
+      console.log(`[BrowserSync] Created new bookmark: ${titleWithTags}`);
+    } else {
+      // 2. 应用标签（通过修改标题添加标签前缀）
+      if (options.applyTags && bookmark.tags.length > 0) {
+        await this.applyTagsToBrowserBookmark(browserBookmark, bookmark.tags);
+        result.tagged++;
+      }
+
+      // 3. 移动到目标文件夹
+      if (options.moveBookmarks) {
+        const targetFolderId = await this.getOrCreateBrowserFolder(bookmark);
+        if (targetFolderId && targetFolderId !== browserBookmark.parentId) {
+          await chrome.bookmarks.move(browserBookmark.id, {
+            parentId: targetFolderId,
+          });
+          result.moved++;
+          console.log(`[BrowserSync] Moved "${bookmark.title}" to folder ${targetFolderId}`);
+        }
       }
     }
   }
