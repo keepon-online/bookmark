@@ -2,16 +2,10 @@
 
 import * as React from 'react';
 import { BookmarksOrganizer, DuplicateManager } from '@/components/organizer';
-import { DebugPanel } from '@/components/debug';
 
 export function OrganizerSettings() {
   return React.createElement('div', { className: 'space-y-6' },
     React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 mb-6' }, '智能整理'),
-
-    // 调试面板（放在顶部，方便查看）
-    React.createElement('div', { className: 'mb-6' },
-      React.createElement(DebugPanel)
-    ),
 
     // 书签整理器
     React.createElement(BookmarksOrganizer),
