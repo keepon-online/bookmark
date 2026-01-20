@@ -6,7 +6,7 @@ export default defineConfig({
   manifest: {
     name: '智能书签',
     description: 'AI 驱动的智能书签管理插件 - 自动分类、标签推荐、跨设备同步、语义搜索、智能整理',
-    version: '0.5.5',
+    version: '0.5.6',
     permissions: [
       'bookmarks',
       'storage',
