@@ -1,5 +1,6 @@
 // 清理空文件夹组件
 
+import * as React from 'react';
 import { useState, useEffect } from 'react';
 import {
   FolderX,
