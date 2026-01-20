@@ -327,7 +327,10 @@ export class FolderService {
       const isEmpty = bookmarksCount === 0;
 
       // 应用最小存在时间过滤
-      if (isEmpty && age < minAge) continue;
+      if (isEmpty && age < minAge) {
+        logger.debug(`Folder too new: ${folder.name} (${Math.round(age/1000/60)} minutes old)`);
+        continue;
+      }
 
       emptyFolders.push({
         folder,
@@ -337,9 +340,20 @@ export class FolderService {
         isEmpty,
         age,
       });
+
+      // 调试日志：显示每个空文件夹的详细信息
+      if (isEmpty) {
+        logger.debug(`Empty folder found: ${folder.name}`, {
+          id: folder.id.substring(0, 8),
+          bookmarksCount,
+          childrenCount: directChildrenCount,
+          allDescendantsCount,
+          ageDays: Math.round(age / (24 * 60 * 60 * 1000)),
+        });
+      }
     }
 
-    logger.debug(`Found ${emptyFolders.length} empty folders`);
+    logger.info(`Found ${emptyFolders.length} empty folders (out of ${allFolders.length} total)`);
     return emptyFolders;
   }
 
@@ -430,13 +444,20 @@ export class FolderService {
     const warnings = [...preview.warnings];
 
     if (!dryRun) {
+      logger.info(`Starting deletion of ${preview.toDelete.length} folders`);
       for (const info of preview.toDelete) {
         try {
           // 递归删除文件夹及其子文件夹
+          logger.debug(`Deleting folder: ${info.folder.name}`, {
+            id: info.folder.id.substring(0, 8),
+            bookmarksCount: info.bookmarksCount,
+            childrenCount: info.allDescendantsCount,
+          });
+
           await this.delete(info.folder.id);
           deleted++;
 
-          logger.debug(`Deleted empty folder: ${info.folder.name}`);
+          logger.info(`✓ Deleted empty folder: ${info.folder.name}`);
         } catch (error) {
           const errorMsg = `删除失败 "${info.folder.name}": ${(error as Error).message}`;
           warnings.push(errorMsg);
