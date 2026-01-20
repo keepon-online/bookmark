@@ -21,6 +21,8 @@ export function DebugPanel() {
   const [organizeError, setOrganizeError] = useState<string | null>(null);
   const [organizeProgress, setOrganizeProgress] = useState<string>('');
   const [syncLog, setSyncLog] = useState<string[]>([]);
+  const [folderList, setFolderList] = useState<any[]>([]);
+  const [showFolders, setShowFolders] = useState(false);
 
   useEffect(() => {
     loadDebugInfo();
@@ -59,6 +61,10 @@ export function DebugPanel() {
         'lastSyncResult',
       ]);
       setLastOrganize(stored);
+
+      // 加载文件夹列表
+      const folders = await db.folders.toArray();
+      setFolderList(folders);
     } catch (error) {
       console.error('Failed to load debug info:', error);
     } finally {
@@ -103,12 +109,24 @@ export function DebugPanel() {
       // 同步到浏览器
       if (result.success) {
         setOrganizeProgress('同步到浏览器...');
+
+        // 统计要同步的书签
+        const withTags = await db.bookmarks.where('tags').notEqual([]).count();
+        const withFolder = await db.bookmarks.where('folderId').above('').count();
+        syncLog.push(`准备同步: ${withTags} 个有标签, ${withFolder} 个有文件夹`);
+        setSyncLog([...syncLog]);
+
         const syncResult = await browserSyncService.syncToBrowser({
           moveBookmarks: true,
           applyTags: true,
         });
 
         console.log('[Debug] 同步完成:', syncResult);
+        syncLog.push(`同步完成: 移动 ${syncResult.moved} 个, 标签 ${syncResult.tagged} 个`);
+        if (syncResult.errors.length > 0) {
+          syncLog.push(`错误: ${syncResult.errors.slice(0, 3).join('; ')}`);
+        }
+        setSyncLog([...syncLog]);
 
         await chrome.storage.local.set({
           lastSyncResult: { moved: syncResult.moved, tagged: syncResult.tagged },
@@ -631,6 +649,35 @@ export function DebugPanel() {
           {lastOrganize.lastOrganizeTime && (
             <div className="text-xs text-green-600 mt-1">
               时间: {new Date(lastOrganize.lastOrganizeTime).toLocaleString()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 文件夹列表 */}
+      {folderList.length > 0 && (
+        <div className="bg-purple-50 p-3 rounded-lg border border-purple-200 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium text-purple-900">
+              数据库文件夹 ({folderList.length} 个)
+            </div>
+            <button
+              onClick={() => setShowFolders(!showFolders)}
+              className="text-xs text-purple-700 hover:text-purple-900 underline"
+            >
+              {showFolders ? '隐藏' : '显示'}
+            </button>
+          </div>
+          {showFolders && (
+            <div className="space-y-1 text-xs">
+              {folderList.map((folder) => (
+                <div key={folder.id} className="flex items-center gap-2 text-purple-800">
+                  <Folder className="w-3 h-3" />
+                  <span className="font-medium">{folder.name}</span>
+                  <span className="text-purple-600">ID: {folder.id}</span>
+                  {folder.parentId && <span className="text-purple-500">父级: {folder.parentId}</span>}
+                </div>
+              ))}
             </div>
           )}
         </div>
