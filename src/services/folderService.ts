@@ -101,16 +101,24 @@ export class FolderService {
     const folders = await this.getAll();
     const bookmarkCounts = await this.getBookmarkCounts();
 
-    // 构建树结构
+    // 构建树结构，递归计算包含子文件夹的书签总数
     const buildTree = (parentId?: string): FolderTreeNode[] => {
       return folders
         .filter((f) => f.parentId === parentId)
         .sort((a, b) => a.order - b.order)
-        .map((folder) => ({
-          ...folder,
-          children: buildTree(folder.id),
-          bookmarkCount: bookmarkCounts[folder.id] || 0,
-        }));
+        .map((folder) => {
+          const children = buildTree(folder.id);
+          // 直接书签数
+          const directCount = bookmarkCounts[folder.id] || 0;
+          // 子文件夹书签总数
+          const childrenCount = children.reduce((sum, child) => sum + child.bookmarkCount, 0);
+
+          return {
+            ...folder,
+            children,
+            bookmarkCount: directCount + childrenCount, // 累计总数
+          };
+        });
     };
 
     return buildTree(undefined);

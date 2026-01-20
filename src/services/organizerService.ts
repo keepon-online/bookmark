@@ -1,7 +1,7 @@
 // 书签整理服务
 
 import { db } from '@/lib/database';
-import { bookmarkService, folderService, tagService, aiService } from '@/services';
+import { bookmarkService, folderService, tagService, aiService, deepSeekAIService } from '@/services';
 import { linkHealthService } from '@/services/linkHealthService';
 import { calculateSimilarity, kMeansClustering, discoverPatterns } from '@/lib/algorithms';
 import type {
@@ -86,14 +86,36 @@ export class OrganizerService {
         message: '智能分类中...',
       });
 
+      // 批量分类提高性能
+      const BATCH_SIZE = 10;
+      let classifications: any[] = [];
+
+      try {
+        // 优先使用 DeepSeek 批量分类
+        classifications = await deepSeekAIService.batchClassify(bookmarks, {
+          batchSize: BATCH_SIZE,
+          fallbackToLocal: true,
+          onProgress: (current, batchTotal) => {
+            onProgress?.({
+              stage: 'classifying',
+              current,
+              total: batchTotal,
+              message: `AI分类中 ${current}/${batchTotal}...`,
+            });
+          },
+        });
+      } catch {
+        // DeepSeek 未初始化，使用本地批量分类
+        classifications = await aiService.batchClassify(bookmarks);
+      }
+
+      // 应用分类结果
       for (let i = 0; i < bookmarks.length; i++) {
         const bookmark = bookmarks[i];
+        const classification = classifications[i];
 
         try {
-          // 使用 AI 服务分类
-          const classification = await aiService.classifyBookmark(bookmark);
-
-          if (classification.confidence >= opts.minConfidence) {
+          if (classification && classification.confidence >= opts.minConfidence) {
             result.classified++;
 
             // 应用标签
@@ -149,12 +171,16 @@ export class OrganizerService {
           }
 
           result.processed++;
-          onProgress?.({
-            stage: 'classifying',
-            current: i + 1,
-            total,
-            message: `已处理 ${i + 1}/${total} 个书签`,
-          });
+
+          // 更新进度（每10个更新一次避免频繁刷新）
+          if (i % 10 === 0 || i === bookmarks.length - 1) {
+            onProgress?.({
+              stage: 'classifying',
+              current: i + 1,
+              total,
+              message: `应用分类 ${i + 1}/${total}...`,
+            });
+          }
         } catch (error) {
           result.errors.push(
             `书签 "${bookmark.title}" 处理失败: ${(error as Error).message}`

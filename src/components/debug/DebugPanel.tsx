@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Bug, RefreshCw, Database, Bookmark, Tag, Folder, Play, AlertCircle, FolderTree } from 'lucide-react';
 import { db } from '@/lib/database';
-import { bookmarkService, organizerService, browserSyncService, folderService } from '@/services';
+import { bookmarkService, organizerService, browserSyncService, folderService, aiService } from '@/services';
 
 export function DebugPanel() {
   const [dbStats, setDbStats] = useState({
@@ -145,7 +145,7 @@ export function DebugPanel() {
     }
   };
 
-  // 仅同步到浏览器
+  // 仅同步到浏览器（包含AI分类）
   const handleSyncToBrowser = async () => {
     setIsSyncing(true);
     setSyncLog([]);
@@ -154,7 +154,33 @@ export function DebugPanel() {
     try {
       console.log('[Debug] 开始同步到浏览器...');
 
-      // 获取所有有标签的书签
+      // 第一步：对没有标签的书签进行AI分类
+      const allBookmarks = await db.bookmarks.toArray();
+      const untaggedBookmarks = allBookmarks.filter((b) => b.tags.length === 0);
+
+      if (untaggedBookmarks.length > 0) {
+        syncLog.push(`发现 ${untaggedBookmarks.length} 个无标签书签，正在进行AI分类...`);
+        setSyncLog([...syncLog]);
+
+        let classified = 0;
+        for (const bookmark of untaggedBookmarks) {
+          try {
+            const result = await aiService.classifyBookmark(bookmark);
+            if (result.suggestedTags.length > 0) {
+              await db.bookmarks.update(bookmark.id, {
+                tags: result.suggestedTags,
+                aiGenerated: true,
+              });
+              classified++;
+            }
+          } catch (err) {
+            console.warn(`[Debug] AI分类失败: ${bookmark.title}`, err);
+          }
+        }
+        syncLog.push(`✓ AI分类完成: ${classified} 个书签已添加标签`);
+      }
+
+      // 第二步：获取所有有标签的书签（包括刚分类的）
       const bookmarks = await db.bookmarks
         .filter((b) => b.tags.length > 0)
         .toArray();

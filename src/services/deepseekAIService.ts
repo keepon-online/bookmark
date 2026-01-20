@@ -218,55 +218,204 @@ export class DeepSeekAIService {
   }
 
   /**
-   * 批量分类书签
+   * 批量分类书签 - 单个API请求处理多个URL
    */
   async batchClassify(
     bookmarks: Bookmark[],
     options: BatchClassifyOptions = {}
   ): Promise<LLMClassificationResult[]> {
     const {
-      batchSize = 5,
-      useCache = true,
+      batchSize = 5, // 每批5个URL在一个请求中处理
       onProgress,
       fallbackToLocal = true,
     } = options;
 
+    this.checkInitialized();
+
     const results: LLMClassificationResult[] = [];
     const total = bookmarks.length;
 
-    for (let i = 0; i < total; i += batchSize) {
-      const batch = bookmarks.slice(i, i + batchSize);
-      const batchPromises = batch.map(async (bookmark) => {
-        try {
-          return await this.classifyBookmark(bookmark);
-        } catch (error) {
-          console.error(`[DeepSeek] Failed to classify ${bookmark.url}:`, error);
-          if (fallbackToLocal) {
-            const localResult = await aiService.classifyBookmark(bookmark);
-            return {
-              ...localResult,
-              reasoning: 'LLM 失败，使用本地分类',
-            } as LLMClassificationResult;
-          }
-          throw error;
-        }
-      });
-
-      const batchResults = await Promise.all(batchPromises);
-      results.push(...batchResults);
-
-      // 进度回调
-      if (onProgress) {
-        onProgress(Math.min(i + batchSize, total), total);
-      }
-
-      // 避免速率限制
-      if (i + batchSize < total) {
-        await this.delay(1000);
+    // 先检查缓存，分离已缓存和未缓存的书签
+    const uncachedBookmarks: { index: number; bookmark: Bookmark }[] = [];
+    for (let i = 0; i < bookmarks.length; i++) {
+      const bookmark = bookmarks[i];
+      const cacheKey = this.getCacheKey(bookmark.url, bookmark.title);
+      const cached = this.cache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        cached.hitCount++;
+        results[i] = cached.result;
+      } else {
+        uncachedBookmarks.push({ index: i, bookmark });
       }
     }
 
+    // 批量处理未缓存的书签
+    for (let i = 0; i < uncachedBookmarks.length; i += batchSize) {
+      const batch = uncachedBookmarks.slice(i, i + batchSize);
+
+      try {
+        // 构建批量分类的提示
+        const batchPrompt = this.buildBatchPrompt(batch.map(b => b.bookmark));
+
+        // 单个API请求处理多个URL
+        const response = await this.client!.chatCompletions({
+          model: this.config!.model || 'deepseek-chat',
+          messages: [
+            { role: 'system', content: this.getBatchSystemPrompt() },
+            { role: 'user', content: batchPrompt },
+          ],
+          temperature: this.config!.temperature ?? 0.3,
+          max_tokens: Math.min(batchSize * 300, 4000), // 每个书签约300 tokens
+        });
+
+        // 解析批量响应
+        const content = response.choices[0]?.message?.content || '';
+        const batchResults = this.parseBatchClassificationResponse(content, batch.length);
+
+        // 更新成本统计（整批的tokens）
+        const tokensPerItem = Math.ceil(response.usage.total_tokens / batch.length);
+        const costPerItem = (response.usage.total_tokens * TOKEN_PRICE) / batch.length;
+
+        // 应用结果到对应位置
+        for (let j = 0; j < batch.length; j++) {
+          const { index, bookmark } = batch[j];
+          const result = batchResults[j] || this.getDefaultResult();
+
+          result.tokensUsed = tokensPerItem;
+          result.cost = costPerItem;
+          result.modelUsed = response.model;
+
+          results[index] = result;
+
+          // 缓存结果
+          const cacheKey = this.getCacheKey(bookmark.url, bookmark.title);
+          this.cache.set(cacheKey, {
+            url: bookmark.url,
+            title: bookmark.title,
+            result,
+            timestamp: Date.now(),
+            expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+            hitCount: 0,
+          });
+        }
+
+        // 更新总成本统计
+        this.updateCostStats(response.usage.total_tokens, response.usage.total_tokens * TOKEN_PRICE);
+
+      } catch (error) {
+        console.error('[DeepSeek] Batch classification failed:', error);
+        // 回退到本地分类
+        if (fallbackToLocal) {
+          for (const { index, bookmark } of batch) {
+            const localResult = await aiService.classifyBookmark(bookmark);
+            results[index] = {
+              ...localResult,
+              reasoning: 'LLM批量调用失败，使用本地分类',
+            } as LLMClassificationResult;
+          }
+        }
+      }
+
+      // 进度回调
+      if (onProgress) {
+        const processed = Math.min(i + batchSize, uncachedBookmarks.length);
+        onProgress(results.filter(r => r).length, total);
+      }
+
+      // 避免速率限制，批次间延迟
+      if (i + batchSize < uncachedBookmarks.length) {
+        await this.delay(500);
+      }
+    }
+
+    await this.saveCache();
     return results;
+  }
+
+  /**
+   * 构建批量分类的用户提示
+   */
+  private buildBatchPrompt(bookmarks: Bookmark[]): string {
+    const bookmarkList = bookmarks.map((b, i) =>
+      `[${i + 1}]\nURL: ${b.url}\n标题: ${b.title}\n描述: ${b.description || '无'}`
+    ).join('\n\n');
+
+    return `请为以下 ${bookmarks.length} 个书签进行分类：\n\n${bookmarkList}\n\n请返回一个JSON数组，每个元素对应一个书签的分类结果。`;
+  }
+
+  /**
+   * 获取批量分类的系统提示
+   */
+  private getBatchSystemPrompt(): string {
+    return `你是一个专业的书签批量分类助手。你的任务是根据书签的 URL、标题和描述，为多个书签同时推荐合适的标签和文件夹。
+
+分类规则：
+1. 标签应该简洁明了，2-4 个字为佳
+2. 文件夹路径使用 "/" 分隔，如 "技术/前端/React"
+3. 置信度范围 0.0-1.0
+4. 为每个书签提供分类结果
+
+返回格式（JSON数组）：
+[
+  {
+    "index": 1,
+    "suggestedTags": ["标签1", "标签2"],
+    "suggestedFolder": "一级分类/二级分类",
+    "contentType": "article|video|documentation|tool|social|shopping|repository|blog|forum|other",
+    "confidence": 0.85,
+    "reasoning": "简短分类依据"
+  },
+  ...
+]
+
+重要：必须按顺序为每个书签返回结果，数组长度必须与输入书签数量一致。`;
+  }
+
+  /**
+   * 解析批量分类响应
+   */
+  private parseBatchClassificationResponse(content: string, expectedCount: number): LLMClassificationResult[] {
+    try {
+      // 尝试提取 JSON 数组
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        throw new Error('No JSON array found in response');
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      if (!Array.isArray(parsed)) {
+        throw new Error('Response is not an array');
+      }
+
+      return parsed.map((item: any) => ({
+        suggestedTags: item.suggestedTags || [],
+        suggestedFolder: item.suggestedFolder,
+        contentType: item.contentType || 'other',
+        confidence: item.confidence || 0.5,
+        reasoning: item.reasoning || '',
+        alternativeTags: item.alternativeTags || [],
+        alternativeFolders: item.alternativeFolders || [],
+        method: 'llm' as const,
+      }));
+    } catch (error) {
+      console.error('[DeepSeek] Failed to parse batch response:', content);
+      // 返回默认结果数组
+      return Array(expectedCount).fill(null).map(() => this.getDefaultResult());
+    }
+  }
+
+  /**
+   * 获取默认分类结果
+   */
+  private getDefaultResult(): LLMClassificationResult {
+    return {
+      suggestedTags: [],
+      contentType: 'other' as ContentType,
+      confidence: 0,
+      method: 'llm',
+      reasoning: '解析失败',
+    };
   }
 
   /**
