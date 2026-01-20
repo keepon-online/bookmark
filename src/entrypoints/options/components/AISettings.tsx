@@ -1,18 +1,16 @@
 // AI 设置页面
 
 import * as React from 'react';
-import { DeepSeekConfig } from '@/components/ai';
 
 export function AISettings() {
   return React.createElement('div', { className: 'space-y-6' },
     React.createElement('h2', { className: 'text-2xl font-bold text-gray-900' }, 'AI 设置'),
-
-    // DeepSeek 配置
-    React.createElement(DeepSeekConfig, {
-      className: '',
-      onConfigChange: (config) => {
-        console.log('AI config changed:', config);
-      },
-    })
+    React.createElement('div', {
+      className: 'bg-yellow-50 border border-yellow-200 rounded-lg p-4',
+    },
+      React.createElement('p', { className: 'text-yellow-800' },
+        'AI 设置功能正在开发中，敬请期待...'
+      )
+    )
   );
 }
