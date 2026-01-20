@@ -3,7 +3,10 @@
 import { db } from '@/lib/database';
 import { bookmarkService } from './bookmarkService';
 import { folderService } from './folderService';
+import { createLogger } from '@/lib/logger';
 import type { Bookmark } from '@/types';
+
+const logger = createLogger('BrowserSync');
 
 /**
  * 浏览器书签节点映射
@@ -54,7 +57,7 @@ export class BrowserSyncService {
         (b) => b.aiGenerated === true && (b.tags.length > 0 || b.folderId)
       );
 
-      console.log(`[BrowserSync] Found ${organizedBookmarks.length} organized bookmarks to sync`);
+      logger.debug(`Found ${organizedBookmarks.length} organized bookmarks to sync`);
 
       // 3. 对每个书签进行同步
       for (const bookmark of organizedBookmarks) {
@@ -276,7 +279,7 @@ export class BrowserSyncService {
   async importAndOrganize(): Promise<{ importResult: any; syncResult: SyncResult }> {
     // 1. 导入浏览器书签
     const importResult = await bookmarkService.importFromBrowser();
-    console.log('[BrowserSync] Import completed:', importResult);
+    logger.debug(' Import completed:', importResult);
 
     // 2. 等待一下，让 AI 分类完成
     await new Promise((resolve) => setTimeout(resolve, 2000));
