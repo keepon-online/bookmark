@@ -80,7 +80,7 @@ export class BrowserSyncService {
   }
 
   /**
-   * 同步单个书签到浏览器
+   * 同步单个书签到浏览器（优化版 - 不修改标题）
    */
   private async syncBookmark(
     bookmark: Bookmark,
@@ -92,32 +92,25 @@ export class BrowserSyncService {
 
     // 如果浏览器中没有这个书签，创建它
     if (!browserBookmark) {
-      console.log(`[BrowserSync] Creating new browser bookmark for: ${bookmark.url}`);
+      logger.debug(`Creating new browser bookmark for: ${bookmark.url}`);
 
       // 获取或创建目标文件夹
       const targetFolderId = await this.getOrCreateBrowserFolder(bookmark);
       const parentId = targetFolderId || '1'; // 默认添加到书签栏
 
-      // 创建新书签
-      const titleWithTags = options.applyTags && bookmark.tags.length > 0
-        ? `${bookmark.tags.map((t) => `[${t}]`).join(' ')} ${bookmark.title}`
-        : bookmark.title;
-
+      // 创建新书签（使用原始标题，不添加标签）
       const newBookmark = await chrome.bookmarks.create({
         parentId,
-        title: titleWithTags,
+        title: bookmark.title,
         url: bookmark.url,
       });
 
       browserBookmark = newBookmark;
       result.moved++;
-      console.log(`[BrowserSync] Created new bookmark: ${titleWithTags}`);
+      logger.debug(`Created new bookmark: ${bookmark.title}`);
     } else {
-      // 2. 应用标签（通过修改标题添加标签前缀）
-      if (options.applyTags && bookmark.tags.length > 0) {
-        await this.applyTagsToBrowserBookmark(browserBookmark, bookmark.tags);
-        result.tagged++;
-      }
+      // 2. 清理旧格式：如果标题包含 [标签]，移除它们
+      await this.cleanupTagPrefix(browserBookmark);
 
       // 3. 移动到目标文件夹
       if (options.moveBookmarks) {
@@ -127,8 +120,34 @@ export class BrowserSyncService {
             parentId: targetFolderId,
           });
           result.moved++;
-          console.log(`[BrowserSync] Moved "${bookmark.title}" to folder ${targetFolderId}`);
+          logger.debug(`Moved "${bookmark.title}" to folder ${targetFolderId}`);
         }
+      }
+    }
+  }
+
+  /**
+   * 清理浏览器书签标题中的标签前缀
+   * 移除 [标签] 格式的前缀，保持标题简洁
+   */
+  private async cleanupTagPrefix(
+    browserBookmark: chrome.bookmarks.BookmarkTreeNode
+  ): Promise<void> {
+    const currentTitle = browserBookmark.title;
+
+    // 检查是否包含标签前缀
+    // 匹配模式：开头的 [xxx] [yyy] 格式
+    const tagPrefixRegex = /^\[([^\]]+)\](\s*\[([^\]]+)\])*\s*/;
+    const match = currentTitle.match(tagPrefixRegex);
+
+    if (match) {
+      // 移除标签前缀，保留原标题
+      const cleanTitle = currentTitle.replace(tagPrefixRegex, '');
+      if (cleanTitle !== currentTitle && cleanTitle.trim()) {
+        await chrome.bookmarks.update(browserBookmark.id, {
+          title: cleanTitle.trim(),
+        });
+        logger.debug(`Cleaned tag prefix: "${currentTitle}" → "${cleanTitle.trim()}"`);
       }
     }
   }
@@ -158,24 +177,17 @@ export class BrowserSyncService {
   }
 
   /**
-   * 应用标签到浏览器书签（通过修改标题）
+   * 应用标签到浏览器书签（已禁用 - 不修改标题）
+   * 标签存储在数据库中，不需要添加到浏览器标题
    */
   private async applyTagsToBrowserBookmark(
     browserBookmark: chrome.bookmarks.BookmarkTreeNode,
     tags: string[]
   ): Promise<void> {
-    // 检查标题是否已包含标签
-    const currentTitle = browserBookmark.title;
-    const tagPrefix = tags.map((t) => `[${t}]`).join(' ');
-
-    // 如果标题开头没有标签，添加标签
-    if (!currentTitle.startsWith('[')) {
-      const newTitle = `${tagPrefix} ${currentTitle}`;
-      await chrome.bookmarks.update(browserBookmark.id, {
-        title: newTitle,
-      });
-      console.log(`[BrowserSync] Applied tags to "${currentTitle}": ${tagPrefix}`);
-    }
+    // 不再修改浏览器书签标题
+    // 标签已经存储在数据库的 bookmarks.tags 字段中
+    // 浏览器标题保持原样，更加简洁
+    logger.debug('Skip applying tags to browser title (tags stored in DB only)');
   }
 
   /**

@@ -201,7 +201,28 @@ syncService.download()
 // Version 4 (当前)
 - 添加 aiGenerated 索引
 - 包含所有表定义（避免索引丢失）
+
+// 设计评估
+// ✅ 优点: 清晰的版本控制，索引策略合理
+// ⚠️ 改进: bookmarkTags 表与 Bookmark.tags 功能重复，建议删除
+// ⚠️ 改进: 使用 .upgrade() 钩子处理数据迁移，而非重复定义所有表
 ```
+
+**设计分析与优化建议:**
+
+1. **Tag 存储冗余**
+   - 当前: `Bookmark.tags[]` + `bookmarkTags` 中间表
+   - 问题: 代码只使用 `tags`，`bookmarkTags` 未使用
+   - 建议: 删除 `bookmarkTags` 表，简化设计
+
+2. **类型转换**
+   - `isFavorite: boolean` 在 IndexedDB 中自动转换为 0/1
+   - 类型定义与实际存储不匹配，建议使用 `0 | 1`
+
+3. **查询优化**
+   - ✅ 核心查询有索引支持（folderId, status, isFavorite）
+   - ⚠️ 标签查询需要全表扫描 `tags` 数组
+   - 建议: 考虑全文搜索索引 `*searchText`
 
 ### 2. 业务逻辑层 (Business Logic)
 

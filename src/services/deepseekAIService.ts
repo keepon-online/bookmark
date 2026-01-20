@@ -250,7 +250,7 @@ export class DeepSeekAIService {
     options: BatchClassifyOptions = {}
   ): Promise<LLMClassificationResult[]> {
     const {
-      batchSize = 5, // 每批5个URL在一个请求中处理
+      batchSize = 20, // 默认每批20个URL（可在10-50之间调整）
       onProgress,
       fallbackToLocal = true,
     } = options;
@@ -259,6 +259,14 @@ export class DeepSeekAIService {
 
     const results: LLMClassificationResult[] = [];
     const total = bookmarks.length;
+
+    // 验证批次大小范围（10-50）
+    const validBatchSize = Math.max(10, Math.min(50, batchSize));
+    if (validBatchSize !== batchSize) {
+      logger.warn(`Batch size adjusted from ${batchSize} to ${validBatchSize} (valid range: 10-50)`);
+    }
+
+    logger.info(`Starting batch classification: ${total} bookmarks, batch size: ${validBatchSize}`);
 
     // 先检查缓存，分离已缓存和未缓存的书签
     const uncachedBookmarks: { index: number; bookmark: Bookmark }[] = [];
@@ -275,8 +283,8 @@ export class DeepSeekAIService {
     }
 
     // 批量处理未缓存的书签
-    for (let i = 0; i < uncachedBookmarks.length; i += batchSize) {
-      const batch = uncachedBookmarks.slice(i, i + batchSize);
+    for (let i = 0; i < uncachedBookmarks.length; i += validBatchSize) {
+      const batch = uncachedBookmarks.slice(i, i + validBatchSize);
 
       try {
         // 构建批量分类的提示
@@ -290,7 +298,7 @@ export class DeepSeekAIService {
             { role: 'user', content: batchPrompt },
           ],
           temperature: this.config!.temperature ?? 0.3,
-          max_tokens: Math.min(batchSize * 300, 4000), // 每个书签约300 tokens
+          max_tokens: Math.min(validBatchSize * 300, 4000), // 每个书签约300 tokens
         });
 
         // 解析批量响应
