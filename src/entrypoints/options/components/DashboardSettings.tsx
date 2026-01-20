@@ -20,15 +20,18 @@ export function DashboardSettings() {
       await initDatabase();
 
       // 基础统计
-      const [bookmarks, folders, tags] = await Promise.all([
-        db.bookmarks.count(),
-        db.folders.count(),
-        db.tags.count(),
-      ]);
+      const bookmarks = await db.bookmarks.count();
+      const folders = await db.folders.count();
+
+      // 统计标签数：获取所有书签的标签，去重后统计
+      const allBookmarks = await db.bookmarks.toArray();
+      const allTags = new Set<string>();
+      allBookmarks.forEach(b => b.tags.forEach(tag => allTags.add(tag)));
+      const tags = allTags.size;
+
       setStats({ bookmarks, folders, tags });
 
       // AI 分类统计
-      const allBookmarks = await db.bookmarks.toArray();
       setAiGenerated(allBookmarks.filter((b) => b.aiGenerated).length);
       setWithTags(allBookmarks.filter((b) => b.tags.length > 0).length);
       setWithFolder(allBookmarks.filter((b) => b.folderId).length);

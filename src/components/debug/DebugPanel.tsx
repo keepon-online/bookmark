@@ -172,8 +172,8 @@ export function DebugPanel() {
 
       syncLog.push(`构建了 ${urlToNodeMap.size} 个浏览器书签的映射`);
 
-      for (const bookmark of bookmarks.slice(0, 20)) {
-        // 处理前20个用于测试
+      for (const bookmark of bookmarks) {
+        // 处理所有有标签的书签
         try {
           const browserNode = urlToNodeMap.get(bookmark.url);
 
@@ -313,9 +313,9 @@ export function DebugPanel() {
           const items = folderBookmarks.get(folderId) || [];
 
           // 在浏览器中查找并移动书签
-          for (const bookmark of items.slice(0, 10)) {
-            // 只处理前10个用于测试
-            const browserNode = await this.findBrowserBookmarkNode(browserTree, bookmark.url);
+          for (const bookmark of items) {
+            // 处理所有书签
+            const browserNode = await findBrowserBookmarkNode(browserTree, bookmark.url);
 
             if (browserNode && browserNode.parentId !== browserFolderId) {
               await chrome.bookmarks.move(browserNode.id, {
