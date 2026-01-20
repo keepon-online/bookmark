@@ -482,10 +482,19 @@ export class OrganizerService {
         }
       }
 
-      // 清理空文件夹
+      // 清理空文件夹（实现）
       if (options.removeEmptyFolders) {
-        const folders = await folderService.getTree();
-        // TODO: 实现空文件夹检测和删除
+        const emptyFolders = await this.findEmptyFolders();
+        for (const folder of emptyFolders) {
+          try {
+            await folderService.delete(folder.id);
+            result.emptyFoldersRemoved++;
+          } catch (error) {
+            result.errors.push(
+              `删除空文件夹失败 "${folder.name}": ${(error as Error).message}`
+            );
+          }
+        }
       }
 
       // 清理未使用的标签
@@ -675,6 +684,30 @@ export class OrganizerService {
    */
   private async findBrokenBookmarks(): Promise<Bookmark[]> {
     return db.bookmarks.where('status').equals('broken').toArray();
+  }
+
+  /**
+   * 辅助方法：查找空文件夹
+   */
+  private async findEmptyFolders(): Promise<Folder[]> {
+    const folders = await folderService.getAll();
+    const bookmarks = await db.bookmarks.toArray();
+
+    // 统计每个文件夹的书签数
+    const folderCounts = new Map<string, number>();
+    for (const bookmark of bookmarks) {
+      if (bookmark.folderId) {
+        folderCounts.set(bookmark.folderId, (folderCounts.get(bookmark.folderId) || 0) + 1);
+      }
+    }
+
+    // 找出空文件夹
+    const emptyFolders = folders.filter(folder => {
+      const count = folderCounts.get(folder.id) || 0;
+      return count === 0;
+    });
+
+    return emptyFolders;
   }
 
   /**

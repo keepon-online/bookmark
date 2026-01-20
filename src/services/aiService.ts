@@ -227,45 +227,44 @@ export class AIService {
   }
 
   /**
-   * 从书签中提取关键词
+   * 从书签中提取关键词（优化版 - 减少标签数量）
    */
   private extractKeywordsFromBookmark(bookmark: Bookmark): string[] {
     const keywords: string[] = [];
 
-    // 从 URL 提取
-    const urlKeywords = urlAnalyzer.extractKeywords(bookmark.url);
-    keywords.push(...urlKeywords);
-
-    // 从标题提取
+    // 只从标题提取（最有价值）
     const titleKeywords = extractKeywords(bookmark.title);
     keywords.push(...titleKeywords);
 
-    // 从描述提取
-    if (bookmark.description) {
-      const descKeywords = extractKeywords(bookmark.description);
-      keywords.push(...descKeywords);
+    // 仅当标题关键词不足时才从 URL 提取
+    if (keywords.length < 3) {
+      const urlKeywords = urlAnalyzer.extractKeywords(bookmark.url);
+      // 只保留域名和路径中的关键部分，不过度拆分
+      keywords.push(...urlKeywords.slice(0, 3));
     }
 
-    // 去重并返回
-    return [...new Set(keywords)];
+    // 不再从描述提取（避免标签过多）
+
+    // 去重并返回，限制总数量
+    return [...new Set(keywords)].slice(0, 8);
   }
 
   /**
-   * 从关键词生成标签
+   * 从关键词生成标签（优化版 - 质量优先）
    */
   private generateTagsFromKeywords(keywords: string[], contentType: ContentType): string[] {
     const tags: string[] = [];
     const keywordSet = new Set(keywords);
 
-    // 基于内容类型添加标签
+    // 基于内容类型添加标签（精简版）
     const typeTags: Record<ContentType, string[]> = {
-      article: ['文章'],
+      article: ['文章'],           // 只保留一个内容类型标签
       video: ['视频'],
       documentation: ['文档'],
       tool: ['工具'],
       social: ['社交'],
       shopping: ['购物'],
-      repository: ['代码', '仓库'],
+      repository: ['仓库'],
       blog: ['博客'],
       forum: ['论坛'],
       other: [],
@@ -273,24 +272,47 @@ export class AIService {
 
     tags.push(...(typeTags[contentType] || []));
 
-    // 从关键词中选择有意义的标签
+    // 从关键词中选择最有价值的标签
     const meaningfulKeywords = [...keywordSet].filter(
-      (kw) => kw.length > 2 && !this.isCommonWord(kw)
+      (kw) =>
+        kw.length >= 2 &&           // 长度至少 2
+        kw.length <= 15 &&          // 避免过长的词
+        !this.isCommonWord(kw) &&   // 不是常见词
+        !kw.includes('.') &&        // 不是文件扩展名
+        !kw.includes('-') &&        // 不是复合词
+        !/^\d+$/.test(kw) &&        // 不是纯数字
+        !/^[a-z]\d+$/.test(kw)      // 不是 "a1" 这种模式
     );
 
-    tags.push(...meaningfulKeywords.slice(0, 5)); // 最多取 5 个关键词
+    // 按长度和重要性排序，取前 3 个
+    const sortedKeywords = meaningfulKeywords
+      .sort((a, b) => b.length - a.length)
+      .slice(0, 3);
 
-    return [...new Set(tags)];
+    tags.push(...sortedKeywords);
+
+    // 最终限制标签总数（内容类型 + 3个关键词 = 最多 4 个）
+    return [...new Set(tags)].slice(0, 4);
   }
 
   /**
-   * 检查是否是常见词
+   * 检查是否是常见词（扩展版 - 包含更多过滤词）
    */
   private isCommonWord(word: string): boolean {
     const commonWords = [
+      // 英文常见词
       'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
       'her', 'was', 'one', 'our', 'out', 'has', 'www', 'com', 'http', 'https',
       'html', 'php', 'index', 'home', 'page', 'site', 'the',
+      // 技术词汇
+      'git', 'api', 'sdk', 'app', 'web', 'dev', 'src', 'lib', 'bin', 'etc',
+      'var', 'let', 'const', 'new', 'this', 'that', 'with', 'from', 'import',
+      // URL 组件
+      'raw', 'master', 'main', 'readme', 'license', 'contributing',
+      // 中文常见词
+      '的', '了', '是', '在', '有', '和', '与', '或', '及', '等',
+      // 域名组件
+      'githubusercontent', 'kimentanm', 'aptv', 'm3u', 'iptv',
     ];
 
     return commonWords.includes(word.toLowerCase());

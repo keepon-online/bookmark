@@ -15,30 +15,49 @@ import type {
 } from '@/types';
 
 /**
- * 默认 Prompt 模板
+ * 默认 Prompt 模板（优化版 - 减少过度分类）
  */
 const DEFAULT_PROMPT_TEMPLATES: PromptTemplate[] = [
   {
     id: 'default-classify',
-    name: '默认分类',
-    description: '通用的书签分类 Prompt',
+    name: '默认分类（优化版）',
+    description: '通用的书签分类 Prompt - 避免过度细分',
     systemPrompt: `你是一个专业的书签分类助手。你的任务是根据书签的 URL、标题和描述，为书签推荐合适的标签和文件夹。
 
-分类规则：
-1. 标签应该简洁明了，2-4 个字为佳
-2. 文件夹路径使用 "/" 分隔，如 "技术/前端/React"
-3. 置信度范围 0.0-1.0，表示你对分类的把握程度
-4. 必须提供推理过程
+重要规则：
+1. **标签精简原则**：只推荐 2-3 个最核心的标签
+   - 优先选择内容类型标签（如：视频、文章、工具）
+   - 避免从 URL 中提取无意义的词（如：raw、master、githubusercontent、aptv、m3u、iptv 等）
+   - 避免添加技术术语作为标签（如：git、api、app、web 等）
+   - 避免添加文件扩展名或路径组件
+
+2. **文件夹分类原则**：扁平化优于层次化
+   - 优先使用一级或二级分类（如："技术" 而非 "技术/前端/React"）
+   - 使用通用分类，避免创建过多细分目录
+   - 常用分类：技术、学习、娱乐、工具、购物、社交、其他
+   - 不要为每个网站创建单独的文件夹
+
+3. **内容类型判断**：
+   - 文章：博客文章、新闻、教程
+   - 视频：视频网站、直播、电影
+   - 工具：在线工具、实用网站
+   - 文档：API 文档、技术文档
+   - 仓库：GitHub、GitLab 代码仓库
+   - 其他：无法明确分类的
+
+4. **置信度评估**：
+   - 0.9-1.0：非常确定
+   - 0.7-0.9：比较确定
+   - 0.5-0.7：不太确定
+   - < 0.5：不确定，不建议自动应用
 
 返回格式（JSON）：
 {
-  "suggestedTags": ["标签1", "标签2", "标签3"],
-  "suggestedFolder": "一级分类/二级分类",
+  "suggestedTags": ["标签1", "标签2"],           // 只给 2-3 个标签
+  "suggestedFolder": "一级分类",                // 扁平化分类
   "contentType": "article|video|documentation|tool|social|shopping|repository|blog|forum|other",
   "confidence": 0.85,
-  "reasoning": "分类依据...",
-  "alternativeTags": ["备选1", "备选2"],
-  "alternativeFolders": ["备选路径1", "备选路径2"]
+  "reasoning": "分类依据..."
 }`,
     userPromptTemplate: `请为以下书签进行分类：
 
@@ -46,9 +65,15 @@ URL: {url}
 标题: {title}
 描述: {description}
 
+要求：
+- 只推荐 2-3 个最相关的标签
+- 使用简单的文件夹分类（最多一级或二级）
+- 避免从 URL 中提取无意义的词
+- 如果不确定，使用 "其他" 分类
+
 请返回 JSON 格式的分类结果。`,
     temperature: 0.3,
-    maxTokens: 500,
+    maxTokens: 300,
   },
   {
     id: 'tech-classify',
