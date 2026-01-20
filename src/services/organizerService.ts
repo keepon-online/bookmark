@@ -591,6 +591,33 @@ export class OrganizerService {
       });
     }
 
+    // 检测空文件夹
+    const emptyFolders = await folderService.findEmptyFolders({
+      recursive: true,
+      excludeRoot: true,
+      minAge: 24 * 60 * 60 * 1000, // 1天
+    });
+
+    if (emptyFolders.length > 0) {
+      suggestions.push({
+        type: 'cleanup',
+        priority: emptyFolders.length > 10 ? 'high' : 'medium',
+        title: `发现 ${emptyFolders.length} 个空文件夹`,
+        description: '清理空文件夹可以让书签结构更清晰',
+        action: async () => {
+          await folderService.deleteEmptyFolders({
+            recursive: true,
+            excludeRoot: true,
+            minAge: 24 * 60 * 60 * 1000,
+          });
+        },
+        estimatedImpact: {
+          foldersAffected: emptyFolders.length,
+          timeSaved: emptyFolders.length * 0.1, // 分钟
+        },
+      });
+    }
+
     // 发现模式
     const patterns = discoverPatterns(bookmarks);
     for (const pattern of patterns.slice(0, 3)) {
