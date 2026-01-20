@@ -273,7 +273,7 @@ export function DebugPanel() {
 
       // 获取所有有文件夹信息的书签
       const bookmarks = await db.bookmarks
-        .filter((b) => b.folderId)
+        .filter((b) => !!b.folderId)
         .toArray();
 
       syncLog.push(`找到 ${bookmarks.length} 个有文件夹的书签`);
@@ -319,11 +319,11 @@ export function DebugPanel() {
       for (const [folderId, folder] of folderMap) {
         try {
           // 构建文件夹路径
-          const path = await this.buildFolderPath(folder);
+          const path = await buildFolderPath(folder);
           const pathStr = path.join('/');
 
           // 在浏览器中创建文件夹
-          const browserFolderId = await this.createBrowserFolder(bookmarkBar, path);
+          const browserFolderId = await createBrowserFolder(bookmarkBar, path);
           createdFolders++;
 
           syncLog.push(`✓ 创建文件夹: ${pathStr}`);

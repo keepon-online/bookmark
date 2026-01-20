@@ -48,10 +48,11 @@ export class BrowserSyncService {
       await this.loadBrowserBookmarks();
 
       // 2. 获取所有已整理的书签（有 AI 生成的标签或文件夹的）
-      const organizedBookmarks = await db.bookmarks
-        .where('aiGenerated')
-        .equals(true)
-        .toArray();
+      // 使用 filter 代替 where 避免 aiGenerated 为 undefined 时的 IDBKeyRange 错误
+      const allBookmarks = await db.bookmarks.toArray();
+      const organizedBookmarks = allBookmarks.filter(
+        (b) => b.aiGenerated === true && (b.tags.length > 0 || b.folderId)
+      );
 
       console.log(`[BrowserSync] Found ${organizedBookmarks.length} organized bookmarks to sync`);
 
