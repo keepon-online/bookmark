@@ -73,3 +73,19 @@ export interface CleanupEmptyFoldersResult {
   warnings: string[];                   // 警告信息
   duration: number;                     // 执行时间（毫秒）
 }
+
+// 浏览器书签栏空文件夹清理类型
+export interface EmptyBrowserFolder {
+  id: string;
+  title: string;
+  path: string;                // 完整路径，如 "书签栏 > 技术 > 前端"
+  parentId?: string;
+  index?: number;
+  dateAdded?: number;
+}
+
+export interface BrowserCleanupResult {
+  deleted: number;             // 删除的文件夹数
+  errors: string[];            // 错误信息
+  duration: number;            // 执行时间（毫秒）
+}

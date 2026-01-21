@@ -298,6 +298,74 @@ export default defineBackground(() => {
           return { success: true, data: pageInfo, requestId: message.requestId };
         }
 
+        // 浏览器书签栏清理 - 扫描空文件夹
+        case 'scanBrowserBookmarks': {
+          const tree = await chrome.bookmarks.getTree();
+          const emptyFolders: any[] = [];
+
+          const scan = (node: any, path: string[] = []) => {
+            const currentPath = [...path, node.title];
+
+            if (!node.url && node.title) {
+              const hasBookmarks = node.children && node.children.some((child: any) => child.url);
+              if (!hasBookmarks) {
+                emptyFolders.push({
+                  id: node.id,
+                  title: node.title,
+                  path: currentPath.join(' > '),
+                  parentId: node.parentId,
+                  index: node.index,
+                  dateAdded: node.dateAdded,
+                });
+              }
+
+              if (node.children) {
+                for (const child of node.children) {
+                  scan(child, currentPath);
+                }
+              }
+            }
+          };
+
+          tree.forEach(scan);
+
+          return {
+            success: true,
+            folders: emptyFolders,
+            requestId: message.requestId,
+          };
+        }
+
+        // 浏览器书签栏清理 - 删除空文件夹
+        case 'cleanupBrowserBookmarks': {
+          const { folderIds } = message.payload as { folderIds: string[] };
+          const startTime = Date.now();
+          let deleted = 0;
+          const errors: string[] = [];
+
+          for (const folderId of folderIds) {
+            try {
+              await chrome.bookmarks.remove(folderId);
+              deleted++;
+            } catch (error) {
+              const errorMsg = `删除失败 ID "${folderId}": ${(error as Error).message}`;
+              errors.push(errorMsg);
+            }
+          }
+
+          const result = {
+            deleted,
+            errors,
+            duration: Date.now() - startTime,
+          };
+
+          return {
+            success: true,
+            result,
+            requestId: message.requestId,
+          };
+        }
+
         default:
           return {
             success: false,

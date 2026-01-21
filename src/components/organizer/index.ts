@@ -3,3 +3,4 @@
 export * from './BookmarksOrganizer';
 export * from './DuplicateManager';
 export * from './EmptyFolderCleanup';
+export * from './BrowserBookmarkCleanup';
