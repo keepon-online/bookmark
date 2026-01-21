@@ -44,34 +44,47 @@ export function BrowserBookmarkCleanup({
     setSelectedFolders(new Set());
 
     try {
-      // 添加超时保护（10秒）
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('扫描超时，请稍后重试')), 60000)
-      );
+      // 包装为 Promise 的消息发送
+      const scanPromise = new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { type: 'SCAN_BROWSER_BOOKMARKS' },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (!response) {
+              reject(new Error('No response from background'));
+            } else {
+              resolve(response);
+            }
+          }
+        );
+      }) as Promise<any>;
 
-      // 调用 background script 扫描
-      const scanPromise = chrome.runtime.sendMessage({
-        type: 'SCAN_BROWSER_BOOKMARKS',
-      });
+      // 60秒超时
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout (60s), check background console')), 60000)
+      );
 
       const response = await Promise.race([scanPromise, timeoutPromise]) as any;
       console.log("[BrowserCleanup] Got response:", response);
 
       if (!response || !response.success) {
-        throw new Error(response?.error || '扫描失败');
+        throw new Error(response?.error || 'Scan failed');
       }
+
+      console.log("[BrowserCleanup] Found " + (response.folders?.length || 0) + " empty folders");
 
       setBrowserFolders(response.folders || []);
       setShowPreview(true);
 
       if (response.folders.length === 0) {
-        setError('浏览器书签栏没有���文件夹');
+        setError('No empty folders found in browser bookmarks');
       } else {
-        // 默认选中所有文件夹
         setSelectedFolders(new Set(response.folders.map((f: any) => f.id)));
       }
     } catch (err) {
-      setError(`扫描失败: ${(err as Error).message}`);
+      console.error('[BrowserCleanup] Scan error:', err);
+      setError("Scan failed: " + (err as Error).message);
     } finally {
       setIsScanning(false);
     }
@@ -98,6 +111,7 @@ export function BrowserBookmarkCleanup({
   };
 
   // 执行清理
+  // 执行清理
   const handleCleanup = async () => {
     if (selectedFolders.size === 0) {
       setError('请至少选择一个文件夹');
@@ -105,8 +119,8 @@ export function BrowserBookmarkCleanup({
     }
 
     const confirmed = confirm(
-      `确认删除选中的 ${selectedFolders.size} 个空文件夹吗？\n\n` +
-      `此操作将直接从浏览器书签栏中删除，不可撤销！`
+      "确认删除选中的 " + selectedFolders.size + " 个空文件夹吗？\n\n" +
+      "此操作将直接从浏览器书签栏中删除，不可撤销！"
     );
 
     if (!confirmed) return;
@@ -115,14 +129,27 @@ export function BrowserBookmarkCleanup({
     setError(null);
 
     try {
-      // 调用 background script 执行删除
-      const response = await chrome.runtime.sendMessage({
-        type: 'CLEANUP_BROWSER_BOOKMARKS',
-        payload: { folderIds: Array.from(selectedFolders) },
+      // 包装为 Promise 的消息发送
+      const response = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          {
+            type: 'CLEANUP_BROWSER_BOOKMARKS',
+            payload: { folderIds: Array.from(selectedFolders) }
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (!response) {
+              reject(new Error('No response from background'));
+            } else {
+              resolve(response);
+            }
+          }
+        );
       }) as any;
 
       if (!response || !response.success) {
-        throw new Error(response?.error || '清理失败');
+        throw new Error(response?.error || 'Cleanup failed');
       }
 
       setResult(response.result);
@@ -130,15 +157,14 @@ export function BrowserBookmarkCleanup({
       onComplete?.(response.result);
 
       if (response.result.deleted > 0) {
-        alert(`✅ 清理完成！已删除 ${response.result.deleted} 个空文件夹`);
+        alert("Cleanup complete! Deleted " + response.result.deleted + " empty folders");
       }
     } catch (err) {
-      setError(`清理失败: ${(err as Error).message}`);
+      setError("Cleanup failed: " + (err as Error).message);
     } finally {
       setIsDeleting(false);
     }
   };
-
   // 刷新按钮
   const handleRefresh = () => {
     setShowPreview(false);
