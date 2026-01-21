@@ -50,20 +50,20 @@ export function BrowserBookmarkCleanup({
 
       // 调用 background script 扫描
       const scanPromise = chrome.runtime.sendMessage({
-        action: 'scanBrowserBookmarks',
+        type: 'SCAN_BROWSER_BOOKMARKS',
       });
 
       const response = await Promise.race([scanPromise, timeoutPromise]) as any;
 
-      if (response.error) {
-        throw new Error(response.error);
+      if (!response || !response.success) {
+        throw new Error(response?.error || '扫描失败');
       }
 
       setBrowserFolders(response.folders || []);
       setShowPreview(true);
 
       if (response.folders.length === 0) {
-        setError('浏览器书签栏没有空文件夹');
+        setError('浏览器书签栏没有���文件夹');
       } else {
         // 默认选中所有文件夹
         setSelectedFolders(new Set(response.folders.map((f: any) => f.id)));
@@ -115,12 +115,12 @@ export function BrowserBookmarkCleanup({
     try {
       // 调用 background script 执行删除
       const response = await chrome.runtime.sendMessage({
-        action: 'cleanupBrowserBookmarks',
-        folderIds: Array.from(selectedFolders),
-      });
+        type: 'CLEANUP_BROWSER_BOOKMARKS',
+        payload: { folderIds: Array.from(selectedFolders) },
+      }) as any;
 
-      if (response.error) {
-        throw new Error(response.error);
+      if (!response || !response.success) {
+        throw new Error(response?.error || '清理失败');
       }
 
       setResult(response.result);

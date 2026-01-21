@@ -299,7 +299,7 @@ export default defineBackground(() => {
         }
 
         // 浏览器书签栏清理 - 扫描空文件夹
-        case 'scanBrowserBookmarks': {
+        case 'SCAN_BROWSER_BOOKMARKS': {
           const startTime = Date.now();
           const tree = await chrome.bookmarks.getTree();
           const emptyFolders: any[] = [];
@@ -351,7 +351,7 @@ export default defineBackground(() => {
         }
 
         // 浏览器书签栏清理 - 删除空文件夹
-        case 'cleanupBrowserBookmarks': {
+        case 'CLEANUP_BROWSER_BOOKMARKS': {
           const { folderIds } = message.payload as { folderIds: string[] };
           const startTime = Date.now();
           let deleted = 0;

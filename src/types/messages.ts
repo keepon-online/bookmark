@@ -46,7 +46,11 @@ export type MessageType =
   | 'GET_STATE'
   | 'GET_CURRENT_TAB'
   | 'STATE_UPDATED'
-  | 'ERROR';
+  | 'ERROR'
+
+  // 浏览器书签栏清理
+  | 'SCAN_BROWSER_BOOKMARKS'
+  | 'CLEANUP_BROWSER_BOOKMARKS';
 
 export interface Message<T = unknown> {
   type: MessageType;
