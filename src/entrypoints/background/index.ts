@@ -300,34 +300,48 @@ export default defineBackground(() => {
 
         // 浏览器书签栏清理 - 扫描空文件夹
         case 'scanBrowserBookmarks': {
+          const startTime = Date.now();
           const tree = await chrome.bookmarks.getTree();
           const emptyFolders: any[] = [];
 
-          const scan = (node: any, path: string[] = []) => {
-            const currentPath = [...path, node.title];
+          // 优化：使用字符串拼接而非数组操作，减少内存分配
+          const scan = (node: any, pathStr: string = '') => {
+            // 早期跳过书签节点
+            if (node.url) return;
 
-            if (!node.url && node.title) {
-              const hasBookmarks = node.children && node.children.some((child: any) => child.url);
+            // 只处理文件夹
+            if (node.title) {
+              const newPath = pathStr ? `${pathStr} > ${node.title}` : node.title;
+
+              // 检查是否为空文件夹（有子节点但无书签）
+              const hasBookmarks = node.children?.some((child: any) => child.url);
+
               if (!hasBookmarks) {
                 emptyFolders.push({
                   id: node.id,
                   title: node.title,
-                  path: currentPath.join(' > '),
+                  path: newPath,
                   parentId: node.parentId,
                   index: node.index,
                   dateAdded: node.dateAdded,
                 });
               }
 
-              if (node.children) {
-                for (const child of node.children) {
-                  scan(child, currentPath);
+              // 递归检查子文件夹
+              if (node.children?.length) {
+                for (let i = 0; i < node.children.length; i++) {
+                  scan(node.children[i], newPath);
                 }
               }
             }
           };
 
-          tree.forEach(scan);
+          // 从根节点开始扫描
+          for (let i = 0; i < tree.length; i++) {
+            scan(tree[i]);
+          }
+
+          console.log(`[Background] Scan completed in ${Date.now() - startTime}ms, found ${emptyFolders.length} empty folders`);
 
           return {
             success: true,

@@ -43,10 +43,17 @@ export function BrowserBookmarkCleanup({
     setSelectedFolders(new Set());
 
     try {
+      // 添加超时保护（10秒）
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('扫描超时，请稍后重试')), 10000)
+      );
+
       // 调用 background script 扫描
-      const response = await chrome.runtime.sendMessage({
+      const scanPromise = chrome.runtime.sendMessage({
         action: 'scanBrowserBookmarks',
       });
+
+      const response = await Promise.race([scanPromise, timeoutPromise]) as any;
 
       if (response.error) {
         throw new Error(response.error);
@@ -59,7 +66,7 @@ export function BrowserBookmarkCleanup({
         setError('浏览器书签栏没有空文件夹');
       } else {
         // 默认选中所有文件夹
-        setSelectedFolders(new Set(response.folders.map(f => f.id)));
+        setSelectedFolders(new Set(response.folders.map((f: any) => f.id)));
       }
     } catch (err) {
       setError(`扫描失败: ${(err as Error).message}`);
