@@ -37,6 +37,7 @@ export function BrowserBookmarkCleanup({
   // 扫描浏览器书签栏
   const handleScan = async () => {
     setIsScanning(true);
+    console.log("[BrowserCleanup] Starting scan...");
     setError(null);
     setBrowserFolders([]);
     setShowPreview(false);
@@ -45,7 +46,7 @@ export function BrowserBookmarkCleanup({
     try {
       // 添加超时保护（10秒）
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('扫描超时，请稍后重试')), 10000)
+        setTimeout(() => reject(new Error('扫描超时，请稍后重试')), 60000)
       );
 
       // 调用 background script 扫描
@@ -54,6 +55,7 @@ export function BrowserBookmarkCleanup({
       });
 
       const response = await Promise.race([scanPromise, timeoutPromise]) as any;
+      console.log("[BrowserCleanup] Got response:", response);
 
       if (!response || !response.success) {
         throw new Error(response?.error || '扫描失败');

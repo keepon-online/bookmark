@@ -300,9 +300,12 @@ export default defineBackground(() => {
 
         // 浏览器书签栏清理 - 扫描空文件夹
         case 'SCAN_BROWSER_BOOKMARKS': {
+          console.log('[Background] Received SCAN_BROWSER_BOOKMARKS request');
           const startTime = Date.now();
           const tree = await chrome.bookmarks.getTree();
           const emptyFolders: any[] = [];
+
+          console.log('[Background] Starting to scan bookmark tree...');
 
           // 优化：使用字符串拼接而非数组操作，减少内存分配
           const scan = (node: any, pathStr: string = '') => {
@@ -341,7 +344,8 @@ export default defineBackground(() => {
             scan(tree[i]);
           }
 
-          console.log(`[Background] Scan completed in ${Date.now() - startTime}ms, found ${emptyFolders.length} empty folders`);
+          const duration = Date.now() - startTime;
+          console.log(`[Background] Scan completed in ${duration}ms, found ${emptyFolders.length} empty folders`);
 
           return {
             success: true,
