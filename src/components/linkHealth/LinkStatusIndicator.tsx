@@ -1,11 +1,10 @@
 // 链接状态指示器组件
 
 import * as React from 'react';
-import { CheckCircle, XCircle, Clock, AlertTriangle, HelpCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, XCircle, HelpCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
 import { linkHealthService } from '@/services/linkHealthService';
-import { httpChecker } from '@/lib/httpChecker';
 import type { BookmarkStatus } from '@/types';
 
 interface LinkStatusIndicatorProps {

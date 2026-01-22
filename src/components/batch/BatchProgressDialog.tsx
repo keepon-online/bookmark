@@ -1,6 +1,5 @@
 // 批量操作进度对话框
 
-import * as React from 'react';
 import { Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';

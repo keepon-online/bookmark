@@ -13,7 +13,6 @@ global.chrome = {
     search: vi.fn(() => Promise.resolve([])),
     getChildren: vi.fn(() => Promise.resolve([])),
     getRecent: vi.fn(() => Promise.resolve([])),
-    getTree: vi.fn(() => Promise.resolve([])),
   },
   storage: {
     local: {

@@ -1,7 +1,7 @@
 // 语义搜索设置组件
 
 import { useState, useEffect } from 'react';
-import { Search, Database, Zap, AlertCircle, CheckCircle2, Settings } from 'lucide-react';
+import { Search, Database, Zap, Settings } from 'lucide-react';
 import { semanticSearchService } from '@/services/semanticSearchService';
 import type { SemanticSearchConfig } from '@/types';
 import { bookmarkService } from '@/services';

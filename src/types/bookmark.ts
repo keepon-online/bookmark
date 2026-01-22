@@ -1,15 +1,8 @@
 // 书签类型定义
 
-export type BookmarkStatus = 'active' | 'broken' | 'pending';
+import type { ContentType } from './ai';
 
-export type ContentType =
-  | 'article'
-  | 'video'
-  | 'documentation'
-  | 'tool'
-  | 'social'
-  | 'shopping'
-  | 'other';
+export type BookmarkStatus = 'active' | 'broken' | 'pending';
 
 export interface BookmarkMeta {
   author?: string;
@@ -70,7 +63,4 @@ export interface ImportResult {
   errors: string[];
 }
 
-export interface DuplicateGroup {
-  url: string;
-  bookmarks: Bookmark[];
-}
+// DuplicateGroup 移到 organizer.ts 中统一定义

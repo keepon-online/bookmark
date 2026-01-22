@@ -1,6 +1,7 @@
 // 书签整理相关类型定义
 
-import type { Bookmark, Folder } from './bookmark';
+import type { Bookmark } from './bookmark';
+import type { Folder } from './folder';
 
 // 整理策略
 export type OrganizeStrategy = 'auto' | 'conservative' | 'aggressive';

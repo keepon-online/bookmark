@@ -1,7 +1,7 @@
 // 书签管理设置页面
 
 import * as React from 'react';
-import { initDatabase, db, exportDatabase, clearDatabase } from '@/lib/database';
+import { db, exportDatabase, clearDatabase } from '@/lib/database';
 import { bookmarkService } from '@/services';
 
 export function BookmarksSettings() {
@@ -47,18 +47,18 @@ export function BookmarksSettings() {
     try {
       const result = await bookmarkService.importFromBrowser();
       setImportResult(
-        `导入完成：成功 ${result.imported} 个，重复 ${result.duplicates} 个，失败 ${result.errors.length} 个`
+        `导入完成:成功 ${result.imported} 个,重复 ${result.duplicates} 个,失败 ${result.errors.length} 个`
       );
       await loadStats();
     } catch (error) {
-      setImportResult(`导入失败：${(error as Error).message}`);
+      setImportResult(`导入失败:${(error as Error).message}`);
     } finally {
       setIsImporting(false);
     }
   };
 
   const handleClear = async () => {
-    if (!confirm('确定要清空所有数据吗？此操作不可恢复！')) {
+    if (!confirm('确定要清空所有数据吗?此操作不可恢复!')) {
       return;
     }
     try {
@@ -112,7 +112,6 @@ export function BookmarksSettings() {
             disabled: isImporting,
             className: 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300',
           }, isImporting ? '导入中...' : '导入')
-          )
         ),
         importResult && React.createElement('div', {
           className: 'p-3 bg-blue-50 text-blue-900 rounded-lg text-sm',
@@ -129,7 +128,6 @@ export function BookmarksSettings() {
             disabled: isExporting,
             className: 'px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300',
           }, isExporting ? '导出中...' : '导出')
-          )
         ),
         React.createElement('div', {
           className: 'flex items-center justify-between p-4 border border-red-200 rounded-lg',
@@ -142,7 +140,6 @@ export function BookmarksSettings() {
             onClick: handleClear,
             className: 'px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700',
           }, '清空')
-          )
         )
       )
     )

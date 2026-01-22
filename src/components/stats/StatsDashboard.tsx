@@ -6,7 +6,6 @@ import {
   TrendingUp,
   Tag,
   Folder,
-  Globe,
   Activity,
   RefreshCw,
   Loader2,

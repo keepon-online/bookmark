@@ -1,6 +1,7 @@
 // 文件夹类型定义
 
-import type { BookmarkStatus, ContentType } from './bookmark';
+import type { BookmarkStatus } from './bookmark';
+import type { ContentType } from './ai';
 
 export interface SmartFilters {
   tags?: string[];

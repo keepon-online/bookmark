@@ -103,15 +103,8 @@ export interface LearningData {
   timestamp: number;
 }
 
-// 分类统计
-export interface ClassificationStats {
-  totalClassified: number;
-  acceptedSuggestions: number;
-  rejectedSuggestions: number;
-  accuracy: number;
-  mostUsedTags: Array<{ tag: string; count: number }>;
-  mostActiveRules: Array<{ ruleId: string; count: number }>;
-}
+// 分类统计 - 从 stats.ts 导入完整定义
+// import type { ClassificationStats } from './stats';
 
 // DeepSeek 配置
 export interface DeepSeekConfig {

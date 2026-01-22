@@ -17,6 +17,7 @@ export default defineBackground(() => {
       setupContextMenu();
       setupAlarms();
       setupCommands();
+      setupBookmarkListeners();
       console.log('[Background] Ready');
     } catch (error) {
       console.error('[Background] Initialization failed:', error);
@@ -25,185 +26,201 @@ export default defineBackground(() => {
 
   // 设置右键菜单
   function setupContextMenu() {
-    browser.contextMenus.removeAll().then(() => {
-      browser.contextMenus.create({
-        id: 'add-bookmark',
-        title: '添加到智能书签',
-        contexts: ['page', 'link'],
-      });
+    if (typeof chrome !== 'undefined' && chrome.contextMenus) {
+      chrome.contextMenus.removeAll(() => {
+        chrome.contextMenus.create({
+          id: 'add-bookmark',
+          title: '添加到智能书签',
+          contexts: ['page', 'link'],
+        });
 
-      browser.contextMenus.create({
-        id: 'add-bookmark-with-tags',
-        title: '添加书签并设置标签...',
-        contexts: ['page', 'link'],
+        chrome.contextMenus.create({
+          id: 'add-bookmark-with-tags',
+          title: '添加书签并设置标签...',
+          contexts: ['page', 'link'],
+        });
+
+        // 处理点击事件
+        chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+          if (!tab?.url) return;
+
+          const url = info.linkUrl || info.pageUrl || tab.url;
+          const title = tab.title || url;
+
+          try {
+            if (info.menuItemId === 'add-bookmark') {
+              await bookmarkService.create({
+                url,
+                title,
+                favicon: tab.favIconUrl,
+              });
+              console.log('[Background] Bookmark added:', url);
+            } else if (info.menuItemId === 'add-bookmark-with-tags') {
+              await bookmarkService.create({
+                url,
+                title,
+                favicon: tab.favIconUrl,
+              });
+            }
+          } catch (error) {
+            console.error('[Background] Failed to add bookmark:', error);
+          }
+        });
       });
-    });
+    }
   }
 
   // 设置定时任务
   function setupAlarms() {
-    // 链接健康检查 - 每 24 小时
-    browser.alarms.create('link-health-check', {
-      periodInMinutes: 60 * 24,
-    });
+    if (typeof chrome !== 'undefined' && chrome.alarms) {
+      // 链接健康检查 - 每 24 小时
+      chrome.alarms.create('link-health-check', {
+        periodInMinutes: 60 * 24,
+      });
 
-    // 清理未使用标签 - 每周
-    browser.alarms.create('cleanup-tags', {
-      periodInMinutes: 60 * 24 * 7,
-    });
+      // 清理未使用标签 - 每周
+      chrome.alarms.create('cleanup-tags', {
+        periodInMinutes: 60 * 24 * 7,
+      });
 
-    // 自动整理书签 - 每天凌晨 2 点执行
-    browser.alarms.create('auto-organize', {
-      periodInMinutes: 60 * 24,
-    });
-  }
+      // 自动整理书签 - 每天凌晨 2 点执行
+      chrome.alarms.create('auto-organize', {
+        periodInMinutes: 60 * 24,
+      });
 
-  // 设置快捷键命令
-  function setupCommands() {
-    browser.commands.onCommand.addListener(async (command) => {
-      console.log('[Background] Command received:', command);
+      // 处理定时任务
+      chrome.alarms.onAlarm.addListener(async (alarm) => {
+        console.log('[Background] Alarm triggered:', alarm.name);
 
-      switch (command) {
-        case 'open-sidepanel':
-          if (browser.sidePanel) {
-            const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-            if (tab[0]?.id) {
-              await browser.sidePanel.open({ windowId: tab[0].windowId });
-            }
-          }
-          break;
+        switch (alarm.name) {
+          case 'link-health-check':
+            console.log('[Background] Running link health check...');
+            break;
 
-        case 'quick-add':
-          try {
-            const pageInfo = await getCurrentPageInfo();
-            if (pageInfo) {
-              await bookmarkService.create({
-                url: pageInfo.url,
-                title: pageInfo.title,
-                favicon: pageInfo.favicon,
-              });
-              console.log('[Background] Quick add:', pageInfo.url);
-            }
-          } catch (error) {
-            console.error('[Background] Quick add failed:', error);
-          }
-          break;
-
-        case 'toggle-favorite':
-          try {
-            const pageInfo = await getCurrentPageInfo();
-            if (!pageInfo?.url) return;
-
-            // 查找现有书签
-            const bookmarks = await bookmarkService.getAll({ limit: 1000 });
-            const existing = bookmarks.find((b) => b.url === pageInfo.url);
-
-            if (existing) {
-              await bookmarkService.toggleFavorite(existing.id);
-              console.log('[Background] Toggled favorite for:', existing.id);
-            }
-          } catch (error) {
-            console.error('[Background] Toggle favorite failed:', error);
-          }
-          break;
-
-        case 'search-bookmarks':
-          // 打开 sidepanel 并聚焦搜索框
-          if (browser.sidePanel) {
-            const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-            if (tab[0]?.id) {
-              await browser.sidePanel.open({ windowId: tab[0].windowId });
-              // TODO: 发送消息到 sidepanel 聚焦搜索框
-            }
-          }
-          break;
-      }
-    });
-  }
-
-  // 处理右键菜单点击
-  browser.contextMenus.onClicked.addListener(async (info, tab) => {
-    if (!tab?.url) return;
-
-    const url = info.linkUrl || info.pageUrl || tab.url;
-    const title = tab.title || url;
-
-    try {
-      if (info.menuItemId === 'add-bookmark') {
-        await bookmarkService.create({
-          url,
-          title,
-          favicon: tab.favIconUrl,
-        });
-        console.log('[Background] Bookmark added:', url);
-      } else if (info.menuItemId === 'add-bookmark-with-tags') {
-        await bookmarkService.create({
-          url,
-          title,
-          favicon: tab.favIconUrl,
-        });
-      }
-    } catch (error) {
-      console.error('[Background] Failed to add bookmark:', error);
-    }
-  });
-
-  // 处理定时任务
-  browser.alarms.onAlarm.addListener(async (alarm) => {
-    console.log('[Background] Alarm triggered:', alarm.name);
-
-    switch (alarm.name) {
-      case 'link-health-check':
-        console.log('[Background] Running link health check...');
-        break;
-
-      case 'cleanup-tags':
-        try {
-          const count = await tagService.cleanupUnused();
-          console.log('[Background] Cleaned up', count, 'unused tags');
-        } catch (error) {
-          console.error('[Background] Failed to cleanup tags:', error);
-        }
-        break;
-
-      case 'auto-organize':
-        console.log('[Background] Running auto-organize...');
-        try {
-          // 检查是否启用了自动整理
-          const config = await chrome.storage.local.get('autoOrganizeConfig');
-          if (config.autoOrganizeConfig?.enabled) {
-            const result = await organizerService.organizeAll({
-              strategy: config.autoOrganizeConfig.strategy || 'auto',
-              createNewFolders: true,
-              applyTags: true,
-              moveBookmarks: false, // 自动整理不移动书签，只分类
-              removeDuplicates: false,
-              minConfidence: config.autoOrganizeConfig.minConfidence || 0.7,
-              archiveUncategorized: false,
-              handleBroken: 'ignore',
-            });
-
-            console.log('[Background] Auto-organize completed:', result);
-
-            // 同步到浏览器书签栏
+          case 'cleanup-tags':
             try {
-              const syncResult = await browserSyncService.syncToBrowser({
-                moveBookmarks: false, // 自动整理不移动
-                applyTags: true, // 应用标签
-              });
-              console.log('[Background] Browser sync completed:', syncResult);
-            } catch (syncError) {
-              console.error('[Background] Browser sync failed:', syncError);
+              const count = await tagService.cleanupUnused();
+              console.log('[Background] Cleaned up', count, 'unused tags');
+            } catch (error) {
+              console.error('[Background] Failed to cleanup tags:', error);
             }
-          } else {
-            console.log('[Background] Auto-organize is disabled');
-          }
-        } catch (error) {
-          console.error('[Background] Auto-organize failed:', error);
+            break;
+
+          case 'auto-organize':
+            console.log('[Background] Running auto-organize...');
+            try {
+              // 检查是否启用了自动整理
+              const config = await chrome.storage.local.get('autoOrganizeConfig');
+              if (config.autoOrganizeConfig?.enabled) {
+                const result = await organizerService.organizeAll({
+                  strategy: config.autoOrganizeConfig.strategy || 'auto',
+                  createNewFolders: true,
+                  applyTags: true,
+                  moveBookmarks: false,
+                  removeDuplicates: false,
+                  minConfidence: config.autoOrganizeConfig.minConfidence || 0.7,
+                  archiveUncategorized: false,
+                  handleBroken: 'ignore',
+                });
+
+                console.log('[Background] Auto-organize completed:', result);
+
+                // 同步到浏览器书签栏
+                try {
+                  const syncResult = await browserSyncService.syncToBrowser({
+                    moveBookmarks: false,
+                    applyTags: true,
+                  });
+                  console.log('[Background] Browser sync completed:', syncResult);
+                } catch (syncError) {
+                  console.error('[Background] Browser sync failed:', syncError);
+                }
+              } else {
+                console.log('[Background] Auto-organize is disabled');
+              }
+            } catch (error) {
+              console.error('[Background] Auto-organize failed:', error);
+            }
+            break;
         }
-        break;
+      });
     }
-  });
+  }
+
+  // 设置命令快捷键
+  function setupCommands() {
+    if (typeof chrome !== 'undefined' && chrome.commands) {
+      chrome.commands.onCommand.addListener(async (command) => {
+        console.log('[Background] Command received:', command);
+
+        switch (command) {
+          case 'open-sidepanel':
+            if (chrome.sidePanel) {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+              if (tab?.id) {
+                await chrome.sidePanel.open({ windowId: tab.windowId });
+              }
+            }
+            break;
+
+          case 'quick-add':
+            try {
+              const pageInfo = await getCurrentPageInfo();
+              if (pageInfo) {
+                await bookmarkService.create({
+                  url: pageInfo.url,
+                  title: pageInfo.title,
+                  favicon: pageInfo.favicon,
+                });
+                console.log('[Background] Quick add:', pageInfo.url);
+              }
+            } catch (error) {
+              console.error('[Background] Quick add failed:', error);
+            }
+            break;
+
+          case 'toggle-favorite':
+            try {
+              const pageInfo = await getCurrentPageInfo();
+              if (!pageInfo?.url) return;
+
+              const bookmarks = await bookmarkService.getAll({ limit: 1000 });
+              const existing = bookmarks.find((b) => b.url === pageInfo.url);
+
+              if (existing) {
+                await bookmarkService.toggleFavorite(existing.id);
+                console.log('[Background] Toggled favorite for:', existing.id);
+              }
+            } catch (error) {
+              console.error('[Background] Toggle favorite failed:', error);
+            }
+            break;
+
+          case 'search-bookmarks':
+            if (chrome.sidePanel) {
+              const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+              if (tab?.id) {
+                await chrome.sidePanel.open({ windowId: tab.windowId });
+              }
+            }
+            break;
+        }
+      });
+    }
+  }
+
+  // 监听浏览器书签变化
+  function setupBookmarkListeners() {
+    if (typeof chrome !== 'undefined' && chrome.bookmarks) {
+      chrome.bookmarks.onCreated.addListener((id, bookmark) => {
+        console.log('[Background] Browser bookmark created:', bookmark.url);
+      });
+
+      chrome.bookmarks.onRemoved.addListener((id, _removeInfo) => {
+        console.log('[Background] Browser bookmark removed:', id);
+      });
+    }
+  }
 
   // 处理消息
   onMessage(async (message: Message, _sender): Promise<MessageResponse> => {
@@ -307,16 +324,11 @@ export default defineBackground(() => {
 
           console.log('[Background] Starting to scan bookmark tree...');
 
-          // 优化：使用字符串拼接而非数组操作，减少内存分配
           const scan = (node: any, pathStr: string = '') => {
-            // 早期跳过书签节点
             if (node.url) return;
 
-            // 只处理文件夹
             if (node.title) {
               const newPath = pathStr ? `${pathStr} > ${node.title}` : node.title;
-
-              // 检查是否为空文件夹（有子节点但无书签）
               const hasBookmarks = node.children?.some((child: any) => child.url);
 
               if (!hasBookmarks) {
@@ -330,7 +342,6 @@ export default defineBackground(() => {
                 });
               }
 
-              // 递归检查子文件夹
               if (node.children?.length) {
                 for (let i = 0; i < node.children.length; i++) {
                   scan(node.children[i], newPath);
@@ -339,7 +350,6 @@ export default defineBackground(() => {
             }
           };
 
-          // 从根节点开始扫描
           for (let i = 0; i < tree.length; i++) {
             scan(tree[i]);
           }
@@ -401,15 +411,6 @@ export default defineBackground(() => {
     }
   });
 
-  // 监听浏览器书签变化
-  browser.bookmarks.onCreated.addListener((id, bookmark) => {
-    console.log('[Background] Browser bookmark created:', bookmark.url);
-  });
-
-  browser.bookmarks.onRemoved.addListener((id, _removeInfo) => {
-    console.log('[Background] Browser bookmark removed:', id);
-  });
-
-  // 启动初始化
+  // 启动
   initialize();
 });

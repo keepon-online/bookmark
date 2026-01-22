@@ -1,7 +1,7 @@
 // 标签建议组件
 
 import * as React from 'react';
-import { Sparkles, Plus, X, Check } from 'lucide-react';
+import { Sparkles, Plus, Check } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/utils';

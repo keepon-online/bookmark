@@ -1,7 +1,7 @@
 // 浏览器书签栏清理组件
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   FolderX,
   Search,
@@ -269,7 +269,7 @@ export function BrowserBookmarkCleanup({
             }
             groups[parentPath].push(folder);
             return groups;
-          }, {} as Record<string, typeof browserFolders>)
+          }, {} as Record<string, EmptyBrowserFolder[]>)
         )].sort(([a, b]) => a.localeCompare(b)).map(([path, folders]) =>
           React.createElement('div', { key: path, className: 'border-b border-gray-200 last:border-0' },
             React.createElement('div', { className: 'bg-gray-100 px-4 py-2 font-medium text-gray-700 text-sm' },

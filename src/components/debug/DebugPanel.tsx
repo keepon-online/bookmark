@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Bug, RefreshCw, Database, Bookmark, Tag, Folder, Play, AlertCircle, FolderTree } from 'lucide-react';
 import { db } from '@/lib/database';
-import { bookmarkService, organizerService, browserSyncService, folderService, aiService } from '@/services';
+import { organizerService, browserSyncService, aiService } from '@/services';
 
 export function DebugPanel() {
   const [dbStats, setDbStats] = useState({

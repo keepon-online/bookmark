@@ -147,7 +147,7 @@ export function BookmarksOrganizer({
 
       // 2. 如果启用同步，将整理结果同步到浏览器书签栏
       if (syncToBrowser && resultData.success) {
-        setProgress({ current: 0, total: 100, message: '正在同步到浏览器书签栏...' });
+        setProgress({ current: 0, total: 100, stage: 'sync', message: '正在同步到浏览器书签栏...' });
 
         const syncData = await browserSyncService.syncToBrowser({
           moveBookmarks: options.moveBookmarks,

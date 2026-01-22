@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import {
   Copy,
   Trash2,
-  Eye,
   AlertCircle,
   Check,
   ExternalLink,

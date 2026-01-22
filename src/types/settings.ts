@@ -1,9 +1,10 @@
 // 设置类型定义
 
+import type { AIProvider } from './ai';
+import type { SyncProvider } from './sync';
+
 export type Theme = 'light' | 'dark' | 'system';
 export type ViewMode = 'list' | 'card' | 'compact';
-export type AIProvider = 'local' | 'openai' | 'claude';
-export type SyncProvider = 'supabase' | 'custom';
 export type ExportFormat = 'json' | 'html';
 
 export interface Settings {

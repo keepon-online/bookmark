@@ -6,7 +6,6 @@ import {
   FolderX,
   Search,
   Trash2,
-  Eye,
   AlertCircle,
   CheckCircle2,
   Loader2,
@@ -16,7 +15,6 @@ import {
 import { folderService } from '@/services';
 import type {
   FindEmptyFoldersOptions,
-  EmptyFolderInfo,
   CleanupPreviewResult,
   CleanupEmptyFoldersResult,
 } from '@/types';
@@ -182,7 +180,7 @@ export function EmptyFolderCleanup({
         React.createElement('label', { className: 'text-sm font-medium text-gray-900' }, '最小存在时间'),
         React.createElement('select', {
           value: options.minAge,
-          onChange: (e) => setOptions({ ...options, minAge: Number(e.target.value) }),
+          onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setOptions({ ...options, minAge: Number(e.target.value) }),
           className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500',
         },
           React.createElement('option', { value: 0 }, '不限制'),

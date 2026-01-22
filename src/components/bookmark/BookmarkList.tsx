@@ -1,6 +1,5 @@
 // 书签列表组件
 
-import * as React from 'react';
 import { BookmarkCard } from './BookmarkCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
