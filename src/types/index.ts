@@ -12,3 +12,4 @@ export * from './sync';
 export * from './search';
 export * from './organizer';
 export * from './stats';
+export * from './profile';
