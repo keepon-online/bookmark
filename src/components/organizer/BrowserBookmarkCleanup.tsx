@@ -37,54 +37,72 @@ export function BrowserBookmarkCleanup({
   // 扫描浏览器书签栏
   const handleScan = async () => {
     setIsScanning(true);
-    console.log("[BrowserCleanup] Starting scan...");
+
     setError(null);
     setBrowserFolders([]);
     setShowPreview(false);
     setSelectedFolders(new Set());
 
     try {
-      // 包装为 Promise 的消息发送
-      const scanPromise = new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(
-          { type: 'SCAN_BROWSER_BOOKMARKS' },
-          (response) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else if (!response) {
-              reject(new Error('No response from background'));
-            } else {
-              resolve(response);
-            }
+      // v7: 直接在前端调用 chrome.bookmarks.getTree()
+      // 不再通过 background script 消息传递
+      const tree = await chrome.bookmarks.getTree();
+
+
+      const emptyFolders: EmptyBrowserFolder[] = [];
+
+      const scan = (node: chrome.bookmarks.BookmarkTreeNode, pathStr: string = '') => {
+        // 跳过 URL（只处理文件夹）
+        if (node.url) return;
+
+        const newPath = node.title ? (pathStr ? `${pathStr} > ${node.title}` : node.title) : pathStr;
+
+        // 先递归扫描子节点
+        if (node.children?.length) {
+          for (const child of node.children) {
+            scan(child, newPath);
           }
-        );
-      }) as Promise<any>;
+        }
 
-      // 60秒超时
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout (60s), check background console')), 60000)
-      );
+        // 空文件夹的定义：
+        // 1. 没有子节点（children 为空数组或 undefined）
+        // 2. 或者只包含空文件夹（递归删除后会变空）
+        // 这里我们使用简单定义：没有任何子节点
+        const isEmpty = !node.children || node.children.length === 0;
 
-      const response = await Promise.race([scanPromise, timeoutPromise]) as any;
-      console.log("[BrowserCleanup] Got response:", response);
+        // 跳过根节点（id 为 "0", "1", "2" 的特殊节点）和没有标题的节点
+        const isSpecialNode = ['0', '1', '2'].includes(node.id);
 
-      if (!response || !response.success) {
-        throw new Error(response?.error || 'Scan failed');
+        if (isEmpty && node.title && !isSpecialNode) {
+          emptyFolders.push({
+            id: node.id,
+            title: node.title,
+            path: newPath,
+            parentId: node.parentId,
+            index: node.index,
+            dateAdded: node.dateAdded,
+          });
+        }
+      };
+
+      // 从根节点开始扫描
+      for (const root of tree) {
+        scan(root);
       }
 
-      console.log("[BrowserCleanup] Found " + (response.folders?.length || 0) + " empty folders");
 
-      setBrowserFolders(response.folders || []);
+
+      setBrowserFolders(emptyFolders);
       setShowPreview(true);
 
-      if (response.folders.length === 0) {
-        setError('No empty folders found in browser bookmarks');
+      if (emptyFolders.length === 0) {
+        setError('没有发现空文件夹');
       } else {
-        setSelectedFolders(new Set(response.folders.map((f: any) => f.id)));
+        setSelectedFolders(new Set(emptyFolders.map(f => f.id)));
       }
     } catch (err) {
-      console.error('[BrowserCleanup] Scan error:', err);
-      setError("Scan failed: " + (err as Error).message);
+      console.error('[BrowserCleanup v7] Scan error:', err);
+      setError("扫描失败: " + (err as Error).message);
     } finally {
       setIsScanning(false);
     }
@@ -109,7 +127,6 @@ export function BrowserBookmarkCleanup({
     }
     setSelectedFolders(newSelected);
   };
-
   // 执行清理
   // 执行清理
   const handleCleanup = async () => {
@@ -129,38 +146,39 @@ export function BrowserBookmarkCleanup({
     setError(null);
 
     try {
-      // 包装为 Promise 的消息发送
-      const response = await new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(
-          {
-            type: 'CLEANUP_BROWSER_BOOKMARKS',
-            payload: { folderIds: Array.from(selectedFolders) }
-          },
-          (response) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else if (!response) {
-              reject(new Error('No response from background'));
-            } else {
-              resolve(response);
-            }
-          }
-        );
-      }) as any;
+      // v8: 直接在前端调用 chrome.bookmarks.remove()
+      const folderIds = Array.from(selectedFolders);
+      const startTime = Date.now();
+      let deleted = 0;
+      const errors: string[] = [];
 
-      if (!response || !response.success) {
-        throw new Error(response?.error || 'Cleanup failed');
+      for (const folderId of folderIds) {
+        try {
+          await chrome.bookmarks.remove(folderId);
+          deleted++;
+        } catch (err) {
+          const errorMsg = `删除失败 ID "${folderId}": ${(err as Error).message}`;
+          errors.push(errorMsg);
+        }
       }
 
-      setResult(response.result);
-      setShowPreview(false);
-      onComplete?.(response.result);
+      const cleanupResult = {
+        deleted,
+        errors,
+        duration: Date.now() - startTime,
+      };
 
-      if (response.result.deleted > 0) {
-        alert("Cleanup complete! Deleted " + response.result.deleted + " empty folders");
+
+
+      setResult(cleanupResult);
+      setShowPreview(false);
+      onComplete?.(cleanupResult);
+
+      if (cleanupResult.deleted > 0) {
+        alert("清理完成！已删除 " + cleanupResult.deleted + " 个空文件夹");
       }
     } catch (err) {
-      setError("Cleanup failed: " + (err as Error).message);
+      setError("清理失败: " + (err as Error).message);
     } finally {
       setIsDeleting(false);
     }
@@ -221,18 +239,18 @@ export function BrowserBookmarkCleanup({
       // 统计信息
       React.createElement('div', { className: 'grid grid-cols-3 gap-4' },
         React.createElement('div', { className: 'bg-orange-50 border border-orange-200 rounded-lg p-4 text-center' },
-        React.createElement('div', { className: 'text-2xl font-bold text-orange-600' }, browserFolders.length),
-        React.createElement('div', { className: 'text-sm text-orange-600' }, '空文件夹')
+          React.createElement('div', { className: 'text-2xl font-bold text-orange-600' }, browserFolders.length),
+          React.createElement('div', { className: 'text-sm text-orange-600' }, '空文件夹')
         ),
         React.createElement('div', { className: 'bg-blue-50 border border-blue-200 rounded-lg p-4 text-center' },
-        React.createElement('div', { className: 'text-2xl font-bold text-blue-600' }, selectedFolders.size),
-        React.createElement('div', { className: 'text-sm text-blue-600' }, '已选择')
+          React.createElement('div', { className: 'text-2xl font-bold text-blue-600' }, selectedFolders.size),
+          React.createElement('div', { className: 'text-sm text-blue-600' }, '已选择')
         ),
         React.createElement('div', { className: 'bg-gray-50 border border-gray-200 rounded-lg p-4 text-center' },
-        React.createElement('div', { className: 'text-lg font-bold text-gray-900' },
-          browserFolders.length - selectedFolders.size
-        ),
-        React.createElement('div', { className: 'text-sm text-gray-600' }, '未选择')
+          React.createElement('div', { className: 'text-lg font-bold text-gray-900' },
+            browserFolders.length - selectedFolders.size
+          ),
+          React.createElement('div', { className: 'text-sm text-gray-600' }, '未选择')
         )
       ),
 
@@ -270,7 +288,7 @@ export function BrowserBookmarkCleanup({
             groups[parentPath].push(folder);
             return groups;
           }, {} as Record<string, EmptyBrowserFolder[]>)
-        )].sort(([a, b]) => a.localeCompare(b)).map(([path, folders]) =>
+        )].sort(([a], [b]) => a.localeCompare(b)).map(([path, folders]) =>
           React.createElement('div', { key: path, className: 'border-b border-gray-200 last:border-0' },
             React.createElement('div', { className: 'bg-gray-100 px-4 py-2 font-medium text-gray-700 text-sm' },
               path
