@@ -114,9 +114,12 @@ export class HttpChecker {
     try {
       const response = await fetch(url, {
         method: options.method,
+        mode: 'no-cors',
         redirect: 'follow',
         signal: controller.signal,
-        // 添加请求头以模拟浏览器
+        cache: 'no-cache',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -126,6 +129,17 @@ export class HttpChecker {
       clearTimeout(timeoutId);
 
       const responseTime = Math.round(performance.now() - startTime);
+
+      // no-cors 模式下 response.type 为 'opaque'
+      if (response.type === 'opaque') {
+        return {
+          url,
+          status: 200,
+          isAccessible: true,
+          responseTime,
+          checkedAt: Date.now(),
+        };
+      }
 
       return {
         url,
@@ -141,19 +155,17 @@ export class HttpChecker {
       const responseTime = Math.round(performance.now() - startTime);
       const err = error as Error;
 
-      // 判断错误类型
       let errorMessage = err.message;
       let status = 0;
 
       if (err.name === 'AbortError') {
         errorMessage = 'Request timeout';
-        status = 408; // Request Timeout
+        status = 408;
       } else if (err.message.includes('NetworkError') || err.message.includes('Failed to fetch')) {
         errorMessage = 'Network error';
-        status = 0;
       } else if (err.message.includes('SSL') || err.message.includes('certificate')) {
         errorMessage = 'SSL certificate error';
-        status = 495; // SSL Certificate Error
+        status = 495;
       }
 
       return {
