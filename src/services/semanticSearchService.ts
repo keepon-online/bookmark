@@ -1,11 +1,9 @@
 // 语义搜索服务 - 基于嵌入向量的智能搜索
 
 import type {
-  EmbeddingModel,
   DocumentEmbedding,
   SemanticSearchResult,
   SemanticSearchConfig,
-  TextChunk,
   APIKeyConfig,
 } from '@/types';
 import { db } from '@/lib/database';

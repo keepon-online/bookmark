@@ -1,7 +1,5 @@
 // AI 相关类型定义
 
-import type { Bookmark } from './bookmark';
-
 export type AIProvider = 'local' | 'openai' | 'claude' | 'deepseek';
 export type ClassificationMethod = 'rule' | 'nlp' | 'hybrid' | 'llm';
 

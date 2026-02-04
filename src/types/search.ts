@@ -28,35 +28,10 @@ export interface SemanticSearchConfig {
   topK: number; // 返回结果数量
 }
 
-// 文本块（用于分块索引）
-export interface TextChunk {
-  id: string;
-  bookmarkId: string;
-  text: string;
-  chunkIndex: number;
-  metadata: {
-    title: string;
-    url: string;
-    tags: string[];
-  };
-}
-
 // API 密钥配置
 export interface APIKeyConfig {
   provider: 'openai' | 'cohere';
   apiKey: string;
   model: string;
   endpoint?: string;
-}
-
-// 批量嵌入请求
-export interface BatchEmbeddingRequest {
-  texts: string[];
-  model?: string;
-}
-
-// 批量嵌入响应
-export interface BatchEmbeddingResponse {
-  embeddings: number[][];
-  model: string;
 }

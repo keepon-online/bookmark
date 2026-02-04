@@ -1,7 +1,6 @@
 // DeepSeek AI 服务 - LLM 驱动的书签分类
 
-import { createDeepSeekClient, type ChatMessage } from '@/lib/deepseekClient';
-import { db } from '@/lib/database';
+import { createDeepSeekClient } from '@/lib/deepseekClient';
 import { aiService } from './aiService';
 import type {
   Bookmark,
