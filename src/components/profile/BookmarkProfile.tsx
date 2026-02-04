@@ -102,14 +102,31 @@ export function BookmarkProfile({ className, onShare }: BookmarkProfileProps) {
   if (!profile || profile.totalBookmarks === 0) {
     return React.createElement(Card, { className },
       React.createElement(CardHeader, null,
-        React.createElement(CardTitle, { className: 'flex items-center gap-2' },
-          React.createElement(FileText, { size: 20 }),
-          '书签档案'
+        React.createElement('div', { className: 'flex items-center justify-between' },
+          React.createElement(CardTitle, { className: 'flex items-center gap-2' },
+            React.createElement(FileText, { size: 20 }),
+            '书签档案'
+          ),
+          React.createElement(Button, {
+            variant: 'outline',
+            size: 'sm',
+            onClick: handleRefresh,
+            disabled: isRefreshing,
+          },
+            React.createElement(RefreshCw, {
+              size: 16,
+              className: cn(isRefreshing && 'animate-spin'),
+            }),
+            '刷新'
+          )
         )
       ),
       React.createElement(CardContent, null,
         React.createElement('div', { className: 'text-center py-8 text-gray-500' },
-          '暂无书签数据，开始收藏你的第一个书签吧！'
+          '暂无书签数据，开始收藏你的第一个书签吧！',
+          React.createElement('p', { className: 'text-xs mt-2' },
+            '如果已导入书签，请点击刷新按钮'
+          )
         )
       )
     );

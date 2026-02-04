@@ -2,3 +2,4 @@
 
 export * from './LinkStatusIndicator';
 export * from './HealthReport';
+export * from './ScanSettingsPanel';

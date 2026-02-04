@@ -15,6 +15,14 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import { linkHealthService } from '@/services/linkHealthService';
 import type { LinkHealthReport, CheckProgress } from '@/types';
+import {
+  ScanSettingsPanel,
+  loadScanSettings,
+  saveScanSettings,
+  toBatchCheckOptions,
+  DEFAULT_SCAN_SETTINGS,
+  type ScanSettings,
+} from './ScanSettingsPanel';
 
 interface HealthReportProps {
   onCheckAll?: () => void;
@@ -26,10 +34,12 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isChecking, setIsChecking] = React.useState(false);
   const [progress, setProgress] = React.useState<CheckProgress | null>(null);
+  const [scanSettings, setScanSettings] = React.useState<ScanSettings>(DEFAULT_SCAN_SETTINGS);
 
-  // 加载报告
+  // 加载报告和设置
   React.useEffect(() => {
     loadReport();
+    loadScanSettings().then(setScanSettings);
   }, []);
 
   const loadReport = async () => {
@@ -48,8 +58,9 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   const handleCheckAll = async () => {
     setIsChecking(true);
     try {
+      const options = toBatchCheckOptions(scanSettings);
       await linkHealthService.checkAllBookmarks(
-        { concurrency: 5, timeout: 5000 },
+        options,
         (p) => setProgress(p)
       );
       await loadReport();
@@ -65,6 +76,12 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   // 停止检查
   const handleStop = () => {
     linkHealthService.stopCheck();
+  };
+
+  // 更新设置
+  const handleSettingsChange = (newSettings: ScanSettings) => {
+    setScanSettings(newSettings);
+    saveScanSettings(newSettings);
   };
 
   if (isLoading) {
@@ -208,6 +225,13 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
             </div>
           )}
         </div>
+
+        {/* 扫描设置面板 */}
+        <ScanSettingsPanel
+          settings={scanSettings}
+          onChange={handleSettingsChange}
+          disabled={isChecking}
+        />
       </CardContent>
     </Card>
   );
