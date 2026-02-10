@@ -11,6 +11,9 @@ export interface SmartFilters {
   isFavorite?: boolean;
 }
 
+// 文件夹同步状态
+export type FolderSyncStatus = 'synced' | 'pending' | 'conflict' | 'not_synced';
+
 export interface Folder {
   id: string;
   name: string;
@@ -22,6 +25,10 @@ export interface Folder {
   smartFilters?: SmartFilters;
   createdAt: number;
   updatedAt: number;
+  // 浏览器同步相关字段
+  browserFolderId?: string;      // 关联的浏览器文件夹 ID
+  syncStatus?: FolderSyncStatus; // 同步状态
+  lastSyncedAt?: number;         // 最后同步时间
 }
 
 export interface CreateFolderDTO {

@@ -1,7 +1,7 @@
 // 设置类型定义
 
 import type { AIProvider } from './ai';
-import type { SyncProvider } from './sync';
+import type { SyncProvider, FolderSyncSettings, DEFAULT_FOLDER_SYNC_SETTINGS } from './sync';
 
 export type Theme = 'light' | 'dark' | 'system';
 export type ViewMode = 'list' | 'card' | 'compact';
@@ -36,6 +36,9 @@ export interface Settings {
   showFavicons: boolean;
   showScreenshots: boolean;
   itemsPerPage: number;
+
+  // 文件夹同步设置
+  folderSync?: FolderSyncSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {

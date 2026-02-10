@@ -13,3 +13,4 @@ export * from './organizerService';
 export * from './statsService';
 export * from './browserSyncService';
 export * from './profileService';
+export * from './folderSyncService';

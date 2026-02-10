@@ -4,6 +4,7 @@ import Dexie, { type Table } from 'dexie';
 import type { Bookmark, Folder, Tag } from '@/types';
 import type { OrganizeHistory } from '@/types/organizer';
 import type { StatsCache } from '@/types/stats';
+import type { FolderMapping, FolderSyncConflict } from '@/types/sync';
 
 // 书签-标签关联表
 export interface BookmarkTag {
@@ -73,6 +74,8 @@ export class BookmarkDatabase extends Dexie {
   statsCache!: Table<StatsCache>;
   bookmarkGroups!: Table<BookmarkGroupRecord>;
   duplicateRecords!: Table<DuplicateRecord>;
+  folderMappings!: Table<FolderMapping>;
+  folderSyncConflicts!: Table<FolderSyncConflict>;
 
   constructor() {
     super('SmartBookmarkDB');
@@ -119,6 +122,25 @@ export class BookmarkDatabase extends Dexie {
       duplicateRecords: 'id, url, detectedAt, resolved',
       embeddings: 'id, bookmarkId, model, createdAt',
     });
+
+    // 版本 5：添加文件夹浏览器同步相关表
+    this.version(5).stores({
+      bookmarks: 'id, url, title, folderId, createdAt, isFavorite, status, isArchived, aiGenerated, [folderId+createdAt]',
+      folders: 'id, name, parentId, order, browserFolderId, syncStatus, [parentId+order]',
+      tags: 'id, &name, usageCount',
+      bookmarkTags: '[bookmarkId+tagId], bookmarkId, tagId',
+      linkChecks: 'id, bookmarkId, checkedAt',
+      syncMeta: 'id, [entityType+entityId], syncStatus',
+      organizeHistory: 'id, timestamp',
+      statsCache: 'id, type, createdAt, expiresAt',
+      bookmarkGroups: 'id, name, createdAt',
+      duplicateRecords: 'id, url, detectedAt, resolved',
+      embeddings: 'id, bookmarkId, model, createdAt',
+      // 新增：文件夹映射表
+      folderMappings: 'id, dbFolderId, browserFolderId, syncStatus',
+      // 新增：文件夹同步冲突表
+      folderSyncConflicts: 'id, type, dbFolderId, browserFolderId, resolved, detectedAt',
+    });
   }
 }
 
@@ -149,6 +171,8 @@ export async function clearDatabase(): Promise<void> {
   await db.statsCache.clear();
   await db.bookmarkGroups.clear();
   await db.duplicateRecords.clear();
+  await db.folderMappings.clear();
+  await db.folderSyncConflicts.clear();
   console.log('[DB] Database cleared');
 }
 
