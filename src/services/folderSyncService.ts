@@ -40,6 +40,13 @@ export class FolderSyncService {
       return { success: false, action: 'skipped', error: 'Sync already in progress' };
     }
 
+    return this.syncFolderToBrowserInternal(dbFolderId);
+  }
+
+  /**
+   * 内部同步方法（不检查 syncInProgress，供批量同步调用）
+   */
+  private async syncFolderToBrowserInternal(dbFolderId: string): Promise<FolderSyncResult> {
     try {
       const folder = await db.folders.get(dbFolderId);
       if (!folder) {
@@ -128,7 +135,7 @@ export class FolderSyncService {
           continue;
         }
 
-        const syncResult = await this.syncFolderToBrowser(folder.id);
+        const syncResult = await this.syncFolderToBrowserInternal(folder.id);
         if (syncResult.success) {
           result.synced++;
         } else {

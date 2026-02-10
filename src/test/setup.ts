@@ -6,13 +6,31 @@ import { vi } from 'vitest';
 global.chrome = {
   bookmarks: {
     getTree: vi.fn(() => Promise.resolve([])),
+    get: vi.fn(() => Promise.resolve([])),
     create: vi.fn(() => Promise.resolve({})),
     update: vi.fn(() => Promise.resolve({})),
     move: vi.fn(() => Promise.resolve({})),
     remove: vi.fn(() => Promise.resolve({})),
+    removeTree: vi.fn(() => Promise.resolve()),
     search: vi.fn(() => Promise.resolve([])),
     getChildren: vi.fn(() => Promise.resolve([])),
     getRecent: vi.fn(() => Promise.resolve([])),
+    onCreated: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+    onRemoved: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+    onMoved: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+    onChanged: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
   },
   storage: {
     local: {
