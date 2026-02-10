@@ -2,9 +2,11 @@
 
 import * as React from 'react';
 import { SyncSettings as SyncSettingsComponent } from '@/components/sync/SyncSettings';
+import { FolderSyncSettingsPanel } from '@/components/sync/FolderSyncSettings';
 
 export function SyncSettings() {
-  const [Component, setComponent] = React.useState<typeof SyncSettingsComponent | null>(null);
+  const [CloudSyncComponent, setCloudSyncComponent] = React.useState<typeof SyncSettingsComponent | null>(null);
+  const [FolderSyncComponent, setFolderSyncComponent] = React.useState<typeof FolderSyncSettingsPanel | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
@@ -12,7 +14,8 @@ export function SyncSettings() {
     // 懒加载组件，避免初始化时卡死
     const timer = setTimeout(() => {
       try {
-        setComponent(() => SyncSettingsComponent);
+        setCloudSyncComponent(() => SyncSettingsComponent);
+        setFolderSyncComponent(() => FolderSyncSettingsPanel);
         setIsLoading(false);
       } catch (err) {
         setError('加载同步设置失败');
@@ -25,7 +28,7 @@ export function SyncSettings() {
 
   if (isLoading) {
     return React.createElement('div', { className: 'space-y-6' },
-      React.createElement('h2', { className: 'text-2xl font-bold text-gray-900' }, '云端同步'),
+      React.createElement('h2', { className: 'text-2xl font-bold text-gray-900' }, '同步设置'),
       React.createElement('div', {
         className: 'bg-gray-50 border border-gray-200 rounded-lg p-6 text-center',
       },
@@ -36,7 +39,7 @@ export function SyncSettings() {
 
   if (error) {
     return React.createElement('div', { className: 'space-y-6' },
-      React.createElement('h2', { className: 'text-2xl font-bold text-gray-900' }, '云端同步'),
+      React.createElement('h2', { className: 'text-2xl font-bold text-gray-900' }, '同步设置'),
       React.createElement('div', {
         className: 'bg-red-50 border border-red-200 rounded-lg p-4',
       },
@@ -46,7 +49,10 @@ export function SyncSettings() {
   }
 
   return React.createElement('div', { className: 'space-y-6' },
-    React.createElement('h2', { className: 'text-2xl font-bold text-gray-900' }, '云端同步'),
-    Component && React.createElement(Component)
+    React.createElement('h2', { className: 'text-2xl font-bold text-gray-900' }, '同步设置'),
+    // 文件夹浏览器同步
+    FolderSyncComponent && React.createElement(FolderSyncComponent),
+    // 云端同步
+    CloudSyncComponent && React.createElement(CloudSyncComponent)
   );
 }
