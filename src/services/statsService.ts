@@ -1,7 +1,7 @@
 // 统计分析服务
 
 import { db } from '@/lib/database';
-import { bookmarkService, tagService, folderService } from '@/services';
+import { tagService, folderService } from '@/services';
 import type {
   OverallStats,
   TimePeriod,
@@ -15,7 +15,6 @@ import type {
   UsagePatterns,
   StatsReport,
   StatsCache,
-  ChartData,
   ContentTypeDistribution,
 } from '@/types';
 
@@ -240,8 +239,6 @@ export class StatsService {
 
     // 计算平均使用频率
     const now = Date.now();
-    const daysSinceEpoch = now / (24 * 60 * 60 * 1000);
-
     for (const stats of tagStats.values()) {
       const daysSinceCreation = (now - stats.lastUsed) / (24 * 60 * 60 * 1000);
       stats.avgUsage = stats.count / Math.max(1, daysSinceCreation);
@@ -496,8 +493,6 @@ export class StatsService {
     const acceptedSuggestions = aiClassified.filter(b => b.tags.length > 0).length;
 
     // 统计有文件夹分配的书签
-    const withFolder = aiClassified.filter(b => !!b.folderId).length;
-
     const stats: ClassificationStats = {
       totalClassified,
       accuracy: totalClassified > 0 ? 0.85 : 0, // 默认准确率
@@ -654,9 +649,10 @@ export class StatsService {
     switch (interval) {
       case 'day':
         return `${year}-${month}-${day}`;
-      case 'week':
+      case 'week': {
         const weekNum = this.getWeekNumber(date);
         return `${year}-W${weekNum}`;
+      }
       case 'month':
         return `${year}-${month}`;
       default:

@@ -1,7 +1,5 @@
 // 链接健康相关类型定义
 
-import type { Bookmark } from './bookmark';
-
 // 链接状态
 export type LinkStatus = 'unknown' | 'healthy' | 'broken' | 'timeout' | 'error';
 

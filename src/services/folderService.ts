@@ -236,7 +236,10 @@ export class FolderService {
       }
     }
 
-    const updates: Partial<Folder> = { updatedAt: now() };
+    const updates: Partial<Folder> = {
+      updatedAt: now(),
+      syncStatus: 'pending',
+    };
 
     if (newParentId !== undefined) {
       updates.parentId = newParentId;
@@ -250,6 +253,16 @@ export class FolderService {
 
     await db.folders.update(id, updates);
 
+    const syncSettings = await this.getFolderSyncSettings();
+    if (syncSettings?.autoSyncToBrowser) {
+      try {
+        const syncService = await this.getFolderSyncService();
+        await syncService.syncFolderToBrowser(id);
+      } catch (error) {
+        logger.warn('Auto sync move to browser failed', error);
+      }
+    }
+
     const updated = await db.folders.get(id);
     return updated!;
   }
@@ -262,7 +275,7 @@ export class FolderService {
       if (currentId === potentialAncestorId) {
         return true;
       }
-      const folder = await db.folders.get(currentId);
+      const folder: Folder | undefined = await db.folders.get(currentId);
       currentId = folder?.parentId;
     }
 
@@ -300,7 +313,7 @@ export class FolderService {
     let currentId: string | undefined = id;
 
     while (currentId) {
-      const folder = await db.folders.get(currentId);
+      const folder: Folder | undefined = await db.folders.get(currentId);
       if (!folder) break;
       path.unshift(folder);
       currentId = folder.parentId;
@@ -327,7 +340,6 @@ export class FolderService {
       recursive = true,
       excludeRoot = true,
       minAge = 0,
-      includeBookmarksCount = true,
     } = options;
 
     logger.debug('Finding empty folders', { recursive, excludeRoot, minAge });
@@ -380,6 +392,18 @@ export class FolderService {
       return count;
     };
 
+    const calculateSubtreeBookmarks = (folderId: string): number => {
+      const directBookmarks = folderBookmarksCount.get(folderId) || 0;
+      const children = folderChildren.get(folderId) || new Set();
+      let total = directBookmarks;
+
+      children.forEach((childId) => {
+        total += calculateSubtreeBookmarks(childId);
+      });
+
+      return total;
+    };
+
     // 4. 识别空文件夹
     const emptyFolders: EmptyFolderInfo[] = [];
     const now = Date.now();
@@ -394,8 +418,10 @@ export class FolderService {
       const allDescendantsCount = recursive ? calculateDescendants(folder.id) : directChildrenCount;
       const age = now - folder.createdAt;
 
-      // 判断是否为空（只要文件夹本身没有书签即可，子文件夹会在递归删除时一起处理）
-      const isEmpty = bookmarksCount === 0;
+      const subtreeBookmarksCount = calculateSubtreeBookmarks(folder.id);
+      const isEmpty = recursive
+        ? subtreeBookmarksCount === 0
+        : bookmarksCount === 0 && directChildrenCount === 0;
 
       // 应用最小存在时间过滤
       if (isEmpty && age < minAge) {
@@ -403,17 +429,16 @@ export class FolderService {
         continue;
       }
 
-      emptyFolders.push({
-        folder,
-        bookmarksCount,
-        childrenCount: directChildrenCount,
-        allDescendantsCount,
-        isEmpty,
-        age,
-      });
-
-      // 调试日志：显示每个空文件夹的详细信息
       if (isEmpty) {
+        emptyFolders.push({
+          folder,
+          bookmarksCount,
+          childrenCount: directChildrenCount,
+          allDescendantsCount,
+          isEmpty,
+          age,
+        });
+
         logger.debug(`Empty folder found: ${folder.name}`, {
           id: folder.id.substring(0, 8),
           bookmarksCount,

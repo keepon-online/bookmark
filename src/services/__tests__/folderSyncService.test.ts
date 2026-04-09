@@ -2,7 +2,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import Dexie from 'dexie';
 import { db } from '@/lib/database';
 import { FolderSyncService } from '@/services/folderSyncService';
 import type { Folder } from '@/types';
@@ -68,7 +67,7 @@ describe('syncFolderToBrowser', () => {
       id: 'browser-folder-1',
       title: '前端开发',
       parentId: '1',
-    } as chrome.bookmarks.BookmarkTreeNode);
+    } as never);
 
     // 执行同步
     const result = await syncService.syncFolderToBrowser(folder.id);

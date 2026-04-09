@@ -2,7 +2,6 @@
 
 import { db } from '@/lib/database';
 import { bookmarkService } from './bookmarkService';
-import { folderService } from './folderService';
 import { createLogger } from '@/lib/logger';
 import type { Bookmark } from '@/types';
 
@@ -157,7 +156,7 @@ export class BrowserSyncService {
    */
   private findBrowserBookmark(url: string): chrome.bookmarks.BookmarkTreeNode | undefined {
     // 遍历所有浏览器书签，查找匹配的 URL
-    for (const [id, node] of Object.entries(this.browserBookmarkMap)) {
+    for (const [, node] of Object.entries(this.browserBookmarkMap)) {
       if (node.url && this.normalizeUrl(node.url) === this.normalizeUrl(url)) {
         return node;
       }
@@ -174,20 +173,6 @@ export class BrowserSyncService {
       .replace(/^https?:\/\//, '')
       .replace(/\/$/, '')
       .replace(/^www\./, '');
-  }
-
-  /**
-   * 应用标签到浏览器书签（已禁用 - 不修改标题）
-   * 标签存储在数据库中，不需要添加到浏览器标题
-   */
-  private async applyTagsToBrowserBookmark(
-    browserBookmark: chrome.bookmarks.BookmarkTreeNode,
-    tags: string[]
-  ): Promise<void> {
-    // 不再修改浏览器书签标题
-    // 标签已经存储在数据库的 bookmarks.tags 字段中
-    // 浏览器标题保持原样，更加简洁
-    logger.debug('Skip applying tags to browser title (tags stored in DB only)');
   }
 
   /**

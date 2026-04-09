@@ -1,4 +1,7 @@
 // 消息类型定义
+import type { CreateBookmarkDTO, UpdateBookmarkDTO } from './bookmark';
+import type { CreateFolderDTO, UpdateFolderDTO } from './folder';
+import type { CreateTagDTO, UpdateTagDTO } from './tag';
 
 export type MessageType =
   // 书签操作
@@ -52,9 +55,40 @@ export type MessageType =
   | 'SCAN_BROWSER_BOOKMARKS'
   | 'CLEANUP_BROWSER_BOOKMARKS';
 
-export interface Message<T = unknown> {
-  type: MessageType;
-  payload?: T;
+export interface MessagePayloadMap {
+  BOOKMARK_CREATE: CreateBookmarkDTO;
+  BOOKMARK_UPDATE: { id: string } & UpdateBookmarkDTO;
+  BOOKMARK_DELETE: string;
+  BOOKMARK_BATCH_DELETE: string[];
+  BOOKMARK_IMPORT: undefined;
+  BOOKMARK_GET_ALL: {
+    folderId?: string;
+    isFavorite?: boolean;
+    isArchived?: boolean;
+    status?: string;
+    limit?: number;
+    offset?: number;
+    sortBy?: 'createdAt' | 'updatedAt' | 'title' | 'visitCount';
+    sortOrder?: 'asc' | 'desc';
+  } | undefined;
+  BOOKMARK_SEARCH: string;
+  FOLDER_CREATE: CreateFolderDTO;
+  FOLDER_UPDATE: { id: string } & UpdateFolderDTO;
+  FOLDER_DELETE: { id: string; moveBookmarksTo?: string };
+  FOLDER_GET_ALL: undefined;
+  TAG_CREATE: CreateTagDTO;
+  TAG_UPDATE: { id: string } & UpdateTagDTO;
+  TAG_DELETE: string;
+  TAG_GET_ALL: undefined;
+  GET_CURRENT_TAB: undefined;
+}
+
+export type MessagePayload<TType extends MessageType> =
+  TType extends keyof MessagePayloadMap ? MessagePayloadMap[TType] : unknown;
+
+export interface Message<TType extends MessageType = MessageType> {
+  type: TType;
+  payload?: MessagePayload<TType>;
   requestId?: string;
 }
 
@@ -66,7 +100,11 @@ export interface MessageResponse<T = unknown> {
 }
 
 // 便捷函数：创建消息
-export function createMessage<T>(type: MessageType, payload?: T, requestId?: string): Message<T> {
+export function createMessage<TType extends MessageType>(
+  type: TType,
+  payload?: MessagePayload<TType>,
+  requestId?: string
+): Message<TType> {
   return { type, payload, requestId };
 }
 

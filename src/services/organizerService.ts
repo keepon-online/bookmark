@@ -2,10 +2,10 @@
 
 import { db } from '@/lib/database';
 import { bookmarkService, folderService, tagService, aiService, deepSeekAIService } from '@/services';
-import { linkHealthService } from '@/services/linkHealthService';
 import { calculateSimilarity, kMeansClustering, discoverPatterns } from '@/lib/algorithms';
 import type {
   Bookmark,
+  Folder,
   OrganizeOptions,
   OrganizeProgress,
   OrganizeResult,
@@ -33,7 +33,6 @@ const DEFAULT_ORGANIZE_OPTIONS: OrganizeOptions = {
 
 export class OrganizerService {
   private isOrganizing = false;
-  private currentProgress: OrganizeProgress | null = null;
 
   /**
    * 一键整理所有书签
@@ -244,7 +243,6 @@ export class OrganizerService {
       return result;
     } finally {
       this.isOrganizing = false;
-      this.currentProgress = null;
     }
   }
 
@@ -532,6 +530,7 @@ export class OrganizerService {
             removeDuplicates: true,
             handleBroken: 'ignore',
             archiveUnused: false,
+            unusedDays: 30,
             removeEmptyFolders: false,
             cleanupUnusedTags: false,
           });
@@ -580,6 +579,7 @@ export class OrganizerService {
             removeDuplicates: false,
             handleBroken: 'archive',
             archiveUnused: false,
+            unusedDays: 30,
             removeEmptyFolders: false,
             cleanupUnusedTags: false,
           });
@@ -612,7 +612,7 @@ export class OrganizerService {
           });
         },
         estimatedImpact: {
-          foldersAffected: emptyFolders.length,
+          bookmarksAffected: emptyFolders.length,
           timeSaved: emptyFolders.length * 0.1, // 分钟
         },
       });
@@ -661,7 +661,6 @@ export class OrganizerService {
     if (!path) return undefined;
 
     // 尝试查找现有文件夹
-    const folders = await folderService.getTree();
     // TODO: 实现路径查找逻辑
 
     if (!create) return undefined;
@@ -683,8 +682,6 @@ export class OrganizerService {
         const newFolder = await folderService.create({
           name: part,
           parentId,
-          order: 0,
-          isSmartFolder: false,
         });
         parentId = newFolder.id;
       }

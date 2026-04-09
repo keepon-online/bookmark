@@ -114,14 +114,12 @@ export class HttpChecker {
     try {
       const response = await fetch(url, {
         method: options.method,
-        mode: 'no-cors',
         redirect: 'follow',
         signal: controller.signal,
         cache: 'no-cache',
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });
@@ -130,13 +128,13 @@ export class HttpChecker {
 
       const responseTime = Math.round(performance.now() - startTime);
 
-      // no-cors 模式下 response.type 为 'opaque'
       if (response.type === 'opaque') {
         return {
           url,
-          status: 200,
-          isAccessible: true,
+          status: 0,
+          isAccessible: false,
           responseTime,
+          errorMessage: 'Opaque response',
           checkedAt: Date.now(),
         };
       }

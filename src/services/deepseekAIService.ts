@@ -1,6 +1,7 @@
 // DeepSeek AI 服务 - LLM 驱动的书签分类
 
 import { createDeepSeekClient } from '@/lib/deepseekClient';
+import { createLogger } from '@/lib/logger';
 import { aiService } from './aiService';
 import type {
   Bookmark,
@@ -126,6 +127,7 @@ URL: {url}
  * deepseek-chat: ¥1/百万 tokens
  */
 const TOKEN_PRICE = 0.000001; // 每个人民币能买的 tokens
+const logger = createLogger('DeepSeekAI');
 
 /**
  * DeepSeek AI 服务
@@ -350,7 +352,6 @@ export class DeepSeekAIService {
 
       // 进度回调
       if (onProgress) {
-        const processed = Math.min(i + batchSize, uncachedBookmarks.length);
         onProgress(results.filter(r => r).length, total);
       }
 

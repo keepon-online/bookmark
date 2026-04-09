@@ -190,7 +190,7 @@ class LocalEmbeddingAPI implements EmbeddingAPI {
     texts.forEach(text => {
       this.tokenize(text).forEach(word => words.add(word));
     });
-    words.forEach((word, i) => {
+    words.forEach((word) => {
       if (!this.vocabulary.has(word)) {
         this.vocabulary.set(word, this.vocabulary.size);
       }
@@ -229,7 +229,7 @@ class LocalEmbeddingAPI implements EmbeddingAPI {
 
   async generateBatchEmbeddings(texts: string[]): Promise<number[][]> {
     this.buildVocabulary(texts);
-    return texts.map(text => this.generateEmbedding(text));
+    return Promise.all(texts.map((text) => this.generateEmbedding(text)));
   }
 }
 
@@ -319,8 +319,7 @@ export class SemanticSearchService {
 
   // 批量生成嵌入向量
   async generateBatchEmbeddings(
-    bookmarks: Bookmark[],
-    onProgress?: (current: number, total: number) => void
+    bookmarks: Bookmark[]
   ): Promise<DocumentEmbedding[]> {
     if (!this.api) {
       throw new Error('Search service not initialized');

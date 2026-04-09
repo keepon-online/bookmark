@@ -181,13 +181,14 @@ export function kMeansClustering(
   // 转换为 BookmarkGroup
   return Array.from(clusters.entries())
     .filter(([_, bookmarks]) => bookmarks.length > 0)
-    .map(([index, bookmarks], i) => ({
+    .map(([, bookmarks], i) => ({
       id: `cluster-${i}`,
       name: generateClusterName(bookmarks),
       bookmarks,
       similarity: calculateClusterCohesion(bookmarks),
+      suggestedTags: [],
       commonTags: findCommonTags(bookmarks),
-      commonDomain: findCommonDomain(bookmarks),
+      commonDomain: findCommonDomain(bookmarks) || undefined,
     }));
 }
 
@@ -480,7 +481,7 @@ function inferTagFromPattern(domain: string, pattern: string): string {
 /**
  * 从模式推断文件夹
  */
-function inferFolderFromPattern(domain: string, pattern: string): string {
+function inferFolderFromPattern(_domain: string, pattern: string): string {
   if (pattern.includes('/docs/')) return '开发/文档';
   if (pattern.includes('/blog/')) return '阅读/博客';
   if (pattern.includes('/api/')) return '开发/API';

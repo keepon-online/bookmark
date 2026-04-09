@@ -1,17 +1,17 @@
 // 消息通信工具
 
-import type { Message, MessageResponse, MessageType } from '@/types';
+import type { Message, MessagePayload, MessageResponse, MessageType } from '@/types';
 
 // 发送消息到 background service worker
-export async function sendMessage<T = unknown, R = unknown>(
-  type: MessageType,
-  payload?: T
+export async function sendMessage<TType extends MessageType, R = unknown>(
+  type: TType,
+  payload?: MessagePayload<TType>
 ): Promise<R> {
   const requestId = crypto.randomUUID();
-  const message: Message<T> = { type, payload, requestId };
+  const message: Message<TType> = { type, payload, requestId };
 
   try {
-    const response = await chrome.runtime.sendMessage<Message<T>, MessageResponse<R>>(message);
+    const response = await chrome.runtime.sendMessage<Message<TType>, MessageResponse<R>>(message);
 
     if (!response) {
       throw new Error('No response from background');
@@ -29,44 +29,38 @@ export async function sendMessage<T = unknown, R = unknown>(
 }
 
 // 监听消息（用于 background）
-export function onMessage<T = unknown, R = unknown>(
+export function onMessage<TType extends MessageType = MessageType, R = unknown>(
   handler: (
-    message: Message<T>,
+    message: Message<TType>,
     sender: chrome.runtime.MessageSender
   ) => Promise<MessageResponse<R>> | MessageResponse<R>
 ): void {
   chrome.runtime.onMessage.addListener(
     (
-      message: Message<T>,
+      message: Message<TType>,
       sender: chrome.runtime.MessageSender,
       sendResponse: (response: MessageResponse<R>) => void
     ) => {
-      // 处理消息并发送响应
-      const result = handler(message, sender);
-
-      if (result instanceof Promise) {
-        result.then(sendResponse).catch((error) => {
+      Promise.resolve(handler(message, sender))
+        .then(sendResponse)
+        .catch((error) => {
           sendResponse({
             success: false,
             error: error.message || 'Unknown error',
             requestId: message.requestId,
           });
         });
-        return true; // 保持消息通道开放
-      } else {
-        sendResponse(result);
-        return false;
-      }
+      return true;
     }
   );
 }
 
 // 广播消息到所有页面
-export async function broadcastMessage<T = unknown>(
-  type: MessageType,
-  payload?: T
+export async function broadcastMessage<TType extends MessageType>(
+  type: TType,
+  payload?: MessagePayload<TType>
 ): Promise<void> {
-  const message: Message<T> = { type, payload };
+  const message: Message<TType> = { type, payload };
 
   // 发送到所有扩展页面
   try {

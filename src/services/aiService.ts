@@ -195,8 +195,8 @@ export class AIService {
   /**
    * 根据内容类型生成建议文件夹
    */
-  private generateFolderFromContentType(contentType: ContentType, tags: string[]): string | undefined {
-    const folderMap: Record<ContentType, string> = {
+  private generateFolderFromContentType(contentType: ContentType, _tags: string[]): string | undefined {
+    const folderMap: Record<ContentType, string | undefined> = {
       article: '学习/文章',
       video: '娱乐/视频',
       documentation: '开发/文档',

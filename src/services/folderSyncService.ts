@@ -9,9 +9,6 @@ import type {
   FolderSyncResult,
   BatchFolderSyncResult,
   FolderSyncConflict,
-  FolderSyncSettings,
-  BrowserFolderInfo,
-  DEFAULT_FOLDER_SYNC_SETTINGS,
 } from '@/types/sync';
 
 const logger = createLogger('FolderSync');
@@ -270,6 +267,22 @@ export class FolderSyncService {
       }
 
       const browserFolder = browserFolders[0];
+      let targetParentId = BOOKMARK_BAR_ID;
+
+      if (folder.parentId) {
+        const parentMapping = await this.getMappingByDbId(folder.parentId);
+        if (parentMapping) {
+          targetParentId = parentMapping.browserFolderId;
+        } else {
+          const parentFolder = await db.folders.get(folder.parentId);
+          if (parentFolder && !parentFolder.isSmartFolder) {
+            const parentResult = await this.syncFolderToBrowser(folder.parentId);
+            if (parentResult.success && parentResult.browserFolderId) {
+              targetParentId = parentResult.browserFolderId;
+            }
+          }
+        }
+      }
 
       // 更新名称
       if (browserFolder.title !== folder.name) {
@@ -278,8 +291,15 @@ export class FolderSyncService {
         });
       }
 
+      if (browserFolder.parentId !== targetParentId) {
+        await chrome.bookmarks.move(mapping.browserFolderId, {
+          parentId: targetParentId,
+        });
+      }
+
       // 更新映射和数据库
       await db.folderMappings.update(mapping.id, {
+        browserParentId: targetParentId,
         lastSyncedAt: now(),
         syncStatus: 'synced',
       });
@@ -564,7 +584,7 @@ export class FolderSyncService {
    */
   private async handleBrowserRemoved(
     id: string,
-    removeInfo: chrome.bookmarks.BookmarkRemoveInfo
+    _removeInfo: chrome.bookmarks.BookmarkRemoveInfo
   ): Promise<void> {
     // 同步进行中时忽略
     if (this.syncInProgress) return;

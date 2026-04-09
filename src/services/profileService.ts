@@ -9,8 +9,6 @@ import type {
   DomainStats,
   TrendDataPoint,
   CollectorLevel,
-  COLLECTOR_LEVELS,
-  CATEGORY_CONFIGS,
 } from '@/types/profile';
 import {
   COLLECTOR_LEVELS as LEVELS,
@@ -439,10 +437,11 @@ export class ProfileService {
     try {
       await db.statsCache.put({
         id: PROFILE_CACHE_KEY,
-        type: 'profile',
+        type: 'overall',
         data: profile as any,
         createdAt: now(),
         expiresAt: now() + CACHE_DURATION,
+        ttl: CACHE_DURATION,
       });
     } catch (error) {
       console.error('[ProfileService] Failed to cache profile:', error);

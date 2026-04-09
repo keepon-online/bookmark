@@ -5,14 +5,12 @@ import type {
   SyncResult,
   SyncConflict,
   BookmarkSyncData,
-  FolderSyncData,
-  TagSyncData,
   DeviceInfo,
   UserSession,
 } from '@/types';
 import { db } from '@/lib/database';
-import { bookmarkService, folderService, tagService } from '@/services';
-import type { Bookmark, Folder, Tag } from '@/types';
+import { bookmarkService } from '@/services';
+import type { Bookmark } from '@/types';
 
 // 简单的 UUID 生成
 function generateUUID(): string {
@@ -272,68 +270,8 @@ export class SyncService {
     };
   }
 
-  // 转换文件夹到同步格式
-  private folderToSyncData(folder: Folder): FolderSyncData {
-    return {
-      id: folder.id,
-      name: folder.name,
-      icon: folder.icon,
-      color: folder.color,
-      parentId: folder.parentId,
-      order: folder.order,
-      isSmartFolder: folder.isSmartFolder,
-      smartFilters: folder.smartFilters,
-      createdAt: folder.createdAt,
-      updatedAt: folder.updatedAt,
-      syncMeta: {
-        version: 1,
-        hash: this.generateHash(folder),
-        deviceId: this.deviceId,
-      },
-    };
-  }
-
-  // 从同步格式转换文件夹
-  private syncDataToFolder(data: FolderSyncData): Folder {
-    return {
-      id: data.id,
-      name: data.name,
-      icon: data.icon,
-      color: data.color,
-      parentId: data.parentId,
-      order: data.order,
-      isSmartFolder: data.isSmartFolder,
-      smartFilters: data.smartFilters,
-      createdAt: data.createdAt,
-      updatedAt: data.updatedAt,
-    };
-  }
-
-  // 转换标签到同步格式
-  private tagToSyncData(tag: Tag): TagSyncData {
-    return {
-      id: tag.id,
-      name: tag.name,
-      color: tag.color,
-      usageCount: tag.usageCount,
-      createdAt: tag.createdAt,
-      syncMeta: {
-        version: 1,
-        hash: this.generateHash(tag),
-        deviceId: this.deviceId,
-      },
-    };
-  }
-
-  // 从同步格式转换标签
-  private syncDataToTag(data: TagSyncData): Tag {
-    return {
-      id: data.id,
-      name: data.name,
-      color: data.color,
-      usageCount: data.usageCount,
-      createdAt: data.createdAt,
-    };
+  private getRemoteSyncMetaVersion(data: any): number {
+    return data.syncMeta?.version ?? data.sync_meta?.version ?? 1;
   }
 
   // 上传书签到云端
@@ -389,7 +327,7 @@ export class SyncService {
     const { data, error } = await this.supabase
       .from('bookmarks')
       .select('*')
-      .order('updated_at', { ascending: false });
+      .order('updatedAt', { ascending: false });
 
     if (error) {
       throw new Error(`Failed to download bookmarks: ${error.message}`);
@@ -407,7 +345,7 @@ export class SyncService {
         id: `bookmark-${syncData.id}`,
         entityType: 'bookmark',
         entityId: syncData.id,
-        version: syncData.sync_meta.version,
+        version: this.getRemoteSyncMetaVersion(syncData),
         lastSyncedAt: Date.now(),
         syncStatus: 'synced',
       });
@@ -519,8 +457,6 @@ export class SyncService {
 
       // 获取本地数据
       const localBookmarks = await bookmarkService.getAll({ limit: 10000 });
-      const localFolders = await folderService.getTree();
-      const localTags = await tagService.getAll();
 
       if (direction === 'upload') {
         // 仅上传

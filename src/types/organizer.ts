@@ -1,7 +1,6 @@
 // 书签整理相关类型定义
 
 import type { Bookmark } from './bookmark';
-import type { Folder } from './folder';
 
 // 整理策略
 export type OrganizeStrategy = 'auto' | 'conservative' | 'aggressive';
@@ -35,7 +34,7 @@ export interface OrganizeOptions {
 
 // 整理进度
 export interface OrganizeProgress {
-  stage: 'analyzing' | 'classifying' | 'organizing' | 'cleanup' | 'complete';
+  stage: 'analyzing' | 'classifying' | 'organizing' | 'sync' | 'cleanup' | 'complete';
   current: number;
   total: number;
   message: string;

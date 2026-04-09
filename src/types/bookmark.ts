@@ -54,6 +54,7 @@ export interface UpdateBookmarkDTO {
   isFavorite?: boolean;
   isArchived?: boolean;
   status?: BookmarkStatus;
+  aiGenerated?: boolean;
 }
 
 export interface ImportResult {

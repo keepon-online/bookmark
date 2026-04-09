@@ -100,7 +100,7 @@ export class UrlAnalyzer {
   /**
    * 检查是否是 GitHub
    */
-  private isGitHub(domain: string, path: string): boolean {
+  private isGitHub(domain: string, _path: string): boolean {
     return (
       domain === 'github.com' ||
       domain === 'gist.github.com' ||
@@ -125,7 +125,7 @@ export class UrlAnalyzer {
   /**
    * 检查是否是文档页面
    */
-  private isDocumentation(domain: string, path: string): boolean {
+  private isDocumentation(_domain: string, path: string): boolean {
     const docIndicators = [
       '/docs/',
       '/doc/',
@@ -143,7 +143,7 @@ export class UrlAnalyzer {
   /**
    * 检查是否是博客
    */
-  private isBlog(domain: string, path: string): boolean {
+  private isBlog(_domain: string, path: string): boolean {
     const blogIndicators = [
       '/blog/',
       '/post/',

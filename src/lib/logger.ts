@@ -43,12 +43,15 @@ function shouldLog(level: LogLevel): boolean {
 function formatPrefix(level: LogLevel, context?: string): string {
   const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
   const prefix = context ? `[${context}]` : '';
-  const levelEmoji = {
+  const levelEmoji: Record<Exclude<LogLevel, 'none'>, string> = {
     debug: '🐛',
     info: 'ℹ️',
     warn: '⚠️',
     error: '❌',
   };
+  if (level === 'none') {
+    return `${timestamp} ${prefix}`.trim();
+  }
   return `${timestamp} ${levelEmoji[level]} ${prefix}`;
 }
 

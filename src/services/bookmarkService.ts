@@ -13,6 +13,13 @@ import type {
 } from '@/types';
 
 export class BookmarkService {
+  private getUrlKey(url: string): string {
+    return normalizeUrl(url)
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '');
+  }
+
   // 创建书签
   async create(dto: CreateBookmarkDTO, autoClassify = true): Promise<Bookmark> {
     if (!isValidUrl(dto.url)) {
@@ -22,7 +29,10 @@ export class BookmarkService {
     const normalizedUrl = normalizeUrl(dto.url);
 
     // 检查是否重复
-    const existing = await db.bookmarks.where('url').equals(normalizedUrl).first();
+    const urlKey = this.getUrlKey(normalizedUrl);
+    const existing = (await db.bookmarks.toArray()).find(
+      (bookmark) => this.getUrlKey(bookmark.url) === urlKey
+    );
     if (existing) {
       throw new Error('Bookmark already exists');
     }
@@ -109,7 +119,18 @@ export class BookmarkService {
       if (!isValidUrl(dto.url)) {
         throw new Error('Invalid URL');
       }
-      updates.url = normalizeUrl(dto.url);
+      const normalizedUrl = normalizeUrl(dto.url);
+      const urlKey = this.getUrlKey(normalizedUrl);
+      const duplicate = (await db.bookmarks.toArray()).find(
+        (existingBookmark) =>
+          existingBookmark.id !== id && this.getUrlKey(existingBookmark.url) === urlKey
+      );
+
+      if (duplicate) {
+        throw new Error('Bookmark already exists');
+      }
+
+      updates.url = normalizedUrl;
     }
 
     await db.bookmarks.update(id, updates);
@@ -370,7 +391,7 @@ export class BookmarkService {
     const urlMap = new Map<string, Bookmark[]>();
 
     for (const bookmark of bookmarks) {
-      const normalized = normalizeUrl(bookmark.url);
+      const normalized = this.getUrlKey(bookmark.url);
       const existing = urlMap.get(normalized) || [];
       existing.push(bookmark);
       urlMap.set(normalized, existing);
@@ -379,7 +400,28 @@ export class BookmarkService {
     const duplicates: DuplicateGroup[] = [];
     for (const [url, bms] of urlMap) {
       if (bms.length > 1) {
-        duplicates.push({ url, bookmarks: bms });
+        const sorted = [...bms].sort((a, b) => {
+          const aTime = a.lastVisited || a.createdAt;
+          const bTime = b.lastVisited || b.createdAt;
+          return bTime - aTime;
+        });
+        const keep = sorted[0];
+
+        duplicates.push({
+          id: `dup-${Date.now()}-${duplicates.length}`,
+          url,
+          bookmarks: bms,
+          keep: keep.id,
+          reason: keep.lastVisited
+            ? `最近访问于 ${new Date(keep.lastVisited).toLocaleDateString()}`
+            : '最早保留记录',
+          duplicates: sorted.slice(1).map((bookmark) => ({
+            id: bookmark.id,
+            title: bookmark.title,
+            createdAt: bookmark.createdAt,
+            lastVisited: bookmark.lastVisited,
+          })),
+        });
       }
     }
 
@@ -426,7 +468,7 @@ export class BookmarkService {
             url: node.url,
             title: node.title || node.url,
             folderId,
-          });
+          }, false);
           result.imported++;
         } catch (error) {
           if ((error as Error).message === 'Bookmark already exists') {
@@ -436,11 +478,36 @@ export class BookmarkService {
           }
         }
       } else if (node.children) {
-        // 这是一个文件夹，递归处理
-        // 暂时将子书签放入当前文件夹
-        await this.processBookmarkTree(node.children, folderId, result);
+        const importedFolderId = await this.getOrCreateImportedFolder(node, folderId);
+        await this.processBookmarkTree(node.children, importedFolderId ?? folderId, result);
       }
     }
+  }
+
+  private async getOrCreateImportedFolder(
+    node: chrome.bookmarks.BookmarkTreeNode,
+    parentId: string | undefined
+  ): Promise<string | undefined> {
+    if (!node.title || node.id === '0' || node.id === '1' || node.id === '2') {
+      return parentId;
+    }
+
+    const existingFolders = await db.folders.toArray();
+    const existing = existingFolders.find(
+      (folder) => folder.name === node.title && folder.parentId === parentId
+    );
+
+    if (existing) {
+      return existing.id;
+    }
+
+    const folder = await folderService.create({
+      name: node.title,
+      parentId,
+      skipBrowserSync: true,
+    });
+
+    return folder.id;
   }
 
   // 更新标签使用计数
@@ -481,8 +548,6 @@ export class BookmarkService {
           const newFolder = await folderService.create({
             name: part,
             parentId,
-            order: 0,
-            isSmartFolder: false,
           });
           parentId = newFolder.id;
         }

@@ -12,4 +12,14 @@ export * from './sync';
 export * from './search';
 export * from './organizer';
 export * from './stats';
-export * from './profile';
+export type {
+  BookmarkProfile,
+  BookmarkCategory,
+  CategoryConfig,
+  CollectorLevel,
+  CollectorLevelConfig,
+  DomainStats as ProfileDomainStats,
+  ShareCardData,
+  TrendDataPoint,
+} from './profile';
+export { COLLECTOR_LEVELS, CATEGORY_CONFIGS } from './profile';

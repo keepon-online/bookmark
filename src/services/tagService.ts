@@ -34,6 +34,7 @@ export class TagService {
 
     // 如果更改名称，检查是否已存在
     if (dto.name && dto.name !== tag.name) {
+      const nextName = dto.name;
       const existing = await db.tags.where('name').equals(dto.name).first();
       if (existing) {
         throw new Error('Tag with this name already exists');
@@ -43,7 +44,7 @@ export class TagService {
       const allBookmarks = await db.bookmarks.toArray();
       const bookmarks = allBookmarks.filter(b => b.tags.includes(tag.name));
       for (const bookmark of bookmarks) {
-        const newTags = bookmark.tags.map((t) => (t === tag.name ? dto.name : t));
+        const newTags = bookmark.tags.map((t) => (t === tag.name ? nextName : t));
         await db.bookmarks.update(bookmark.id, { tags: newTags });
       }
     }
@@ -85,7 +86,7 @@ export class TagService {
 
   // 获取所有标签
   async getAll(options?: { sortBy?: 'name' | 'usageCount'; sortOrder?: 'asc' | 'desc' }): Promise<Tag[]> {
-    let tags = await db.tags.toArray();
+    const tags = await db.tags.toArray();
 
     const sortBy = options?.sortBy || 'usageCount';
     const sortOrder = options?.sortOrder || 'desc';
