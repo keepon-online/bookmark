@@ -9,22 +9,28 @@ export function useBookmarks() {
   const bookmarkStore = useBookmarkStore();
   const folderStore = useFolderStore();
   const tagStore = useTagStore();
+  const loadBookmarks = useBookmarkStore((state) => state.loadBookmarks);
+  const loadFolders = useFolderStore((state) => state.loadFolders);
+  const loadTags = useTagStore((state) => state.loadTags);
+  const refreshBookmarks = useBookmarkStore((state) => state.refresh);
+  const refreshFolders = useFolderStore((state) => state.refresh);
+  const refreshTags = useTagStore((state) => state.refresh);
 
   useEffect(() => {
     const init = async () => {
       try {
         await initDatabase();
         await Promise.all([
-          bookmarkStore.loadBookmarks(),
-          folderStore.loadFolders(),
-          tagStore.loadTags(),
+          loadBookmarks(),
+          loadFolders(),
+          loadTags(),
         ]);
       } catch (error) {
         console.error('Failed to initialize bookmarks:', error);
       }
     };
     init();
-  }, []);
+  }, [loadBookmarks, loadFolders, loadTags]);
 
   return {
     bookmarks: bookmarkStore.bookmarks,
@@ -36,9 +42,9 @@ export function useBookmarks() {
     error: bookmarkStore.error || folderStore.error || tagStore.error,
     refresh: async () => {
       await Promise.all([
-        bookmarkStore.refresh(),
-        folderStore.refresh(),
-        tagStore.refresh(),
+        refreshBookmarks(),
+        refreshFolders(),
+        refreshTags(),
       ]);
     },
   };

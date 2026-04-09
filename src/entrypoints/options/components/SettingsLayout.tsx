@@ -6,7 +6,7 @@ import { SidebarNav } from './SidebarNav';
 interface SettingsLayoutProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 export function SettingsLayout({ activeTab, setActiveTab, children }: SettingsLayoutProps) {

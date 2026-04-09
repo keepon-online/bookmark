@@ -82,7 +82,7 @@ export function SettingsPage() {
 
   return React.createElement(
     SettingsLayout,
-    { activeTab, setActiveTab },
+    { activeTab, setActiveTab: (tab) => setActiveTab(tab as SettingsTab) },
     renderContent()
   );
 }

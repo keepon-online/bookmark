@@ -198,7 +198,7 @@ export function DebugPanel() {
       browserTree.forEach(countBookmarks);
       syncLog.push(`浏览器中有 ${browserCount} 个书签`);
 
-      let moved = 0;
+      const moved = 0;
       let tagged = 0;
       let notFound = 0;
       let alreadyTagged = 0;

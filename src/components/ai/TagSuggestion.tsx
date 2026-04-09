@@ -23,6 +23,7 @@ export function TagSuggestion({
   onReject,
   className,
 }: TagSuggestionProps) {
+  const { url, title, description } = bookmark;
   const [suggestions, setSuggestions] = React.useState<ClassificationResult | null>(null);
   const [selectedTags, setSelectedTags] = React.useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = React.useState(false);
@@ -30,12 +31,25 @@ export function TagSuggestion({
 
   // 获取建议
   React.useEffect(() => {
-    if (!bookmark.url || !bookmark.title || hasClassified) return;
+    if (!url || !title || hasClassified) return;
 
     const classify = async () => {
       setIsLoading(true);
       try {
-        const result = await aiService.classifyBookmark(bookmark as Bookmark);
+        const result = await aiService.classifyBookmark({
+          id: 'tag-suggestion-preview',
+          url,
+          title,
+          description,
+          tags: [],
+          createdAt: 0,
+          updatedAt: 0,
+          visitCount: 0,
+          isFavorite: false,
+          isArchived: false,
+          status: 'active',
+          aiGenerated: false,
+        } as Bookmark);
         // 过滤已存在的标签
         const newTags = result.suggestedTags.filter((t) => !existingTags.includes(t));
         if (newTags.length > 0) {
@@ -51,7 +65,7 @@ export function TagSuggestion({
     };
 
     classify();
-  }, [bookmark.url, bookmark.title, existingTags, hasClassified]);
+  }, [url, title, description, existingTags, hasClassified]);
 
   // 切换标签选择
   const toggleTag = (tag: string) => {

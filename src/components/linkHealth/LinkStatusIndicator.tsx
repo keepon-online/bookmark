@@ -20,7 +20,7 @@ interface LinkStatusIndicatorProps {
 export function LinkStatusIndicator({
   bookmarkId,
   status,
-  url,
+  url: _url,
   onStatusChange,
   showCheckButton = false,
   size = 'sm',

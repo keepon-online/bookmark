@@ -3,7 +3,6 @@
 import * as React from 'react';
 import { Settings, Info } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import type { BatchCheckOptions } from '@/types/linkHealth';
 

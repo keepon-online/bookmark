@@ -13,10 +13,8 @@ import {
   Activity,
   Globe,
   Star,
-  Archive,
   Sparkles,
   AlertCircle,
-  Copy,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -381,7 +379,7 @@ function CollapsibleSection({ title, expanded, onToggle, children }: {
   title: string;
   expanded: boolean;
   onToggle: () => void;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   return React.createElement(Card, null,
     React.createElement('button', {

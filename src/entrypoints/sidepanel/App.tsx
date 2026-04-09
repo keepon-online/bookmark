@@ -9,15 +9,11 @@ import {
   Clock,
   AlertTriangle,
   FolderOpen,
-  Tag,
-  Search,
   ChevronRight,
-  ChevronDown,
   Import,
   RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { SearchBar } from '@/components/search/SearchBar';
@@ -62,9 +58,8 @@ export function App() {
   } = useBookmarkStore();
 
   const { folderTree, loadFolders } = useFolderStore();
-  const { tags, popularTags, loadTags } = useTagStore();
+  const { popularTags, loadTags } = useTagStore();
   const { openEditBookmark, sidebarCollapsed, toggleSidebar } = useUIStore();
-  const { importFromBrowser } = useBookmarkStore.getState();
 
   // 初始化
   React.useEffect(() => {
@@ -79,7 +74,7 @@ export function App() {
       }
     };
     init();
-  }, []);
+  }, [loadBookmarks, loadFolders, loadTags]);
 
   // 处理视图切换
   const handleViewChange = (view: ViewType) => {
@@ -120,9 +115,6 @@ export function App() {
     setSelectedTag(tag);
     setSelectedFolderId(undefined);
     clearFilters();
-    // 过滤包含该标签的书签
-    const filtered = bookmarks.filter((b) => b.tags.includes(tag));
-    // 由于 store 不直接支持标签过滤，我们在本地处理
   };
 
   // 处理搜索
@@ -356,7 +348,7 @@ export function App() {
                 <Settings className="h-4 w-4" />
               </Button>
               <Button
-                variant={currentView === 'add' ? 'default' : 'default'}
+                variant="default"
                 size="sm"
                 className="gap-1"
                 onClick={() => handleViewChange('add')}

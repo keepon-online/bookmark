@@ -49,7 +49,7 @@ export function App() {
       }
     };
     init();
-  }, []);
+  }, [loadBookmarks, loadFolders, loadTags]);
 
   // 处理视图切换
   const handleViewChange = (view: ViewType) => {

@@ -1,6 +1,4 @@
 // 批量操作工具栏组件
-
-import * as React from 'react';
 import {
   Trash2,
   FolderInput,
