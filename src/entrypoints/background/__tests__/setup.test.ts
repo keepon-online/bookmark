@@ -9,9 +9,11 @@ describe('background setup helpers', () => {
     vi.clearAllMocks();
   });
 
-  it('registers context menu entries and creates a bookmark from the clicked page', async () => {
-    const create = vi.fn().mockResolvedValue(undefined);
-    let handleClick: ((info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) => Promise<void>) | undefined;
+  it('registers context menu entry and creates a browser bookmark on click', async () => {
+    const createBookmark = vi.fn().mockResolvedValue(undefined);
+    let handleClick:
+      | ((info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) => Promise<void>)
+      | undefined;
 
     setupContextMenu({
       contextMenus: {
@@ -23,7 +25,7 @@ describe('background setup helpers', () => {
           }),
         },
       },
-      bookmarkService: { create },
+      createBookmark,
       logger: { log: vi.fn(), error: vi.fn() },
     });
 
@@ -37,104 +39,54 @@ describe('background setup helpers', () => {
       {
         url: 'https://example.com/page',
         title: 'Example Page',
-        favIconUrl: 'https://example.com/favicon.ico',
       } as chrome.tabs.Tab
     );
 
-    expect(create).toHaveBeenCalledWith({
+    expect(createBookmark).toHaveBeenCalledWith({
       url: 'https://example.com/page',
       title: 'Example Page',
-      favicon: 'https://example.com/favicon.ico',
     });
   });
 
-  it('registers alarms and runs cleanup-tags via tagService', async () => {
-    const cleanupUnused = vi.fn().mockResolvedValue(3);
-    let handleAlarm: ((alarm: chrome.alarms.Alarm) => Promise<void>) | undefined;
+  it('registers the link-health-check alarm', () => {
     const create = vi.fn();
 
     setupAlarms({
       alarms: {
         create,
         onAlarm: {
-          addListener: vi.fn((listener) => {
-            handleAlarm = listener;
-          }),
+          addListener: vi.fn(),
         },
-      },
-      storage: {
-        get: vi.fn().mockResolvedValue({}),
-      },
-      tagService: { cleanupUnused },
-      organizerService: {
-        organizeAll: vi.fn(),
-      },
-      logger: { log: vi.fn(), error: vi.fn() },
-    });
-
-    expect(create).toHaveBeenCalledTimes(3);
-    expect(handleAlarm).toBeTypeOf('function');
-
-    await handleAlarm?.({ name: 'cleanup-tags', scheduledTime: Date.now() } as chrome.alarms.Alarm);
-
-    expect(cleanupUnused).toHaveBeenCalledTimes(1);
-  });
-
-  it('auto-organize alarm uses stored config when enabled', async () => {
-    let handleAlarm: ((alarm: chrome.alarms.Alarm) => Promise<void>) | undefined;
-    const organizeAll = vi.fn().mockResolvedValue({ organized: 2 });
-
-    setupAlarms({
-      alarms: {
-        create: vi.fn(),
-        onAlarm: {
-          addListener: vi.fn((listener) => {
-            handleAlarm = listener;
-          }),
-        },
-      },
-      storage: {
-        get: vi.fn().mockResolvedValue({
-          autoOrganizeConfig: {
-            enabled: true,
-            strategy: 'smart',
-            minConfidence: 0.9,
-          },
-        }),
-      },
-      tagService: { cleanupUnused: vi.fn() },
-      organizerService: { organizeAll },
-      logger: { log: vi.fn(), error: vi.fn() },
-    });
-
-    await handleAlarm?.({ name: 'auto-organize', scheduledTime: Date.now() } as chrome.alarms.Alarm);
-
-    expect(organizeAll).toHaveBeenCalledWith({
-      strategy: 'smart',
-      createNewFolders: true,
-      applyTags: true,
-      moveBookmarks: false,
-      removeDuplicates: false,
-      minConfidence: 0.9,
-      archiveUncategorized: false,
-      handleBroken: 'ignore',
-    });
-  });
-
-  it('registers bookmark creation and removal listeners', () => {
-    const onCreated = { addListener: vi.fn() };
-    const onRemoved = { addListener: vi.fn() };
-
-    setupBookmarkListeners({
-      bookmarks: {
-        onCreated,
-        onRemoved,
       },
       logger: { log: vi.fn() },
     });
 
-    expect(onCreated.addListener).toHaveBeenCalledTimes(1);
-    expect(onRemoved.addListener).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith('link-health-check', { periodInMinutes: 60 * 24 });
+  });
+
+  it('cleans orphan meta when a browser bookmark is removed', async () => {
+    const cleanOrphanMeta = vi.fn().mockResolvedValue(1);
+    let handleRemoved: ((id: string, removeInfo: unknown) => void) | undefined;
+
+    setupBookmarkListeners({
+      bookmarks: {
+        onRemoved: {
+          addListener: vi.fn((listener) => {
+            handleRemoved = listener;
+          }),
+        },
+      },
+      cleanOrphanMeta,
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(handleRemoved).toBeTypeOf('function');
+    handleRemoved?.('bookmark-1', { parentId: '1', index: 0 });
+
+    // 异步清理被触发
+    await vi.waitFor(() => {
+      expect(cleanOrphanMeta).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('registers command listener and forwards the command to the handler', async () => {
@@ -152,11 +104,8 @@ describe('background setup helpers', () => {
       },
       createCommandHandler,
       commandDeps: {
-        bookmarkService: {
-          create: vi.fn(),
-          getAll: vi.fn(),
-          toggleFavorite: vi.fn(),
-        },
+        addBookmarkToBar: vi.fn(),
+        toggleFavoriteByUrl: vi.fn(),
       },
       logger: { log: vi.fn() },
     });

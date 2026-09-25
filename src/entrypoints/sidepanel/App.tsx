@@ -1,4 +1,6 @@
 // Sidepanel 主应用组件
+// v0.6：数据来自 chrome.bookmarks（唯一数据源），文件夹树/标签/搜索全部
+// 基于内存快照派生；增删改移直写浏览器书签。
 
 import * as React from 'react';
 import {
@@ -10,184 +12,124 @@ import {
   AlertTriangle,
   FolderOpen,
   ChevronRight,
-  Import,
   RefreshCw,
+  Tag as TagIcon,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { SearchBar } from '@/components/search/SearchBar';
-import { BookmarkList } from '@/components/bookmark/BookmarkList';
-import { AddBookmarkForm } from '@/components/bookmark/AddBookmarkForm';
-import {
-  useBookmarkStore,
-  useFolderStore,
-  useTagStore,
-  useUIStore,
-  initializeTheme,
-} from '@/stores';
-import { initDatabase } from '@/lib/database';
+import { BrowserBookmarkList } from '@/components/bookmark/BrowserBookmarkList';
+import { BrowserBookmarkForm } from '@/components/bookmark/BrowserBookmarkForm';
+import { useFilteredBookmarks } from '@/components/bookmark/useBookmarkFilter';
+import { useBrowserBookmarkStore, selectAllTags, initializeTheme } from '@/stores';
 import { cn } from '@/lib/utils';
-import type { FolderTreeNode } from '@/types';
+import type { BrowserTreeNode } from '@/types';
 import '@/styles/globals.css';
 
-type ViewType = 'all' | 'favorites' | 'recent' | 'broken' | 'folder' | 'tag' | 'add';
+type ViewType = 'all' | 'favorites' | 'recent' | 'broken' | 'folder' | 'tag';
 
 export function App() {
-  const [currentView, setCurrentView] = React.useState<ViewType>('all');
-  const [searchQuery, setSearchQuery] = React.useState('');
-  const [selectedFolderId, setSelectedFolderId] = React.useState<string | undefined>();
-  const [selectedTag, setSelectedTag] = React.useState<string | undefined>();
-  const [isInitialized, setIsInitialized] = React.useState(false);
-  const [isImporting, setIsImporting] = React.useState(false);
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [isAddOpen, setIsAddOpen] = React.useState(false);
 
-  const {
-    bookmarks,
-    isLoading,
-    selectedIds,
-    loadBookmarks,
-    search,
-    toggleSelect,
-    toggleFavorite,
-    deleteBookmark,
-    createBookmark,
-    setFilters,
-    setCurrentFolder,
-    clearFilters,
-    refresh,
-  } = useBookmarkStore();
+  const isInitialized = useBrowserBookmarkStore((state) => state.isInitialized);
+  const isLoading = useBrowserBookmarkStore((state) => state.isLoading);
+  const tree = useBrowserBookmarkStore((state) => state.tree);
+  const folders = useBrowserBookmarkStore((state) => state.folders);
+  const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
+  const meta = useBrowserBookmarkStore((state) => state.meta);
+  const selectedIds = useBrowserBookmarkStore((state) => state.selectedIds);
+  const currentFolderId = useBrowserBookmarkStore((state) => state.currentFolderId);
+  const filter = useBrowserBookmarkStore((state) => state.filter);
+  const selectedTag = useBrowserBookmarkStore((state) => state.selectedTag);
+  const searchQuery = useBrowserBookmarkStore((state) => state.searchQuery);
 
-  const { folderTree, loadFolders } = useFolderStore();
-  const { popularTags, loadTags } = useTagStore();
-  const { openEditBookmark, sidebarCollapsed, toggleSidebar } = useUIStore();
+  const setSearchQuery = useBrowserBookmarkStore((state) => state.setSearchQuery);
+  const setCurrentFolder = useBrowserBookmarkStore((state) => state.setCurrentFolder);
+  const setFilter = useBrowserBookmarkStore((state) => state.setFilter);
+  const toggleSelect = useBrowserBookmarkStore((state) => state.toggleSelect);
+  const clearSelection = useBrowserBookmarkStore((state) => state.clearSelection);
+  const toggleFavorite = useBrowserBookmarkStore((state) => state.toggleFavorite);
+  const removeBookmarks = useBrowserBookmarkStore((state) => state.removeBookmarks);
+  const updateBookmark = useBrowserBookmarkStore((state) => state.updateBookmark);
+  const moveBookmarks = useBrowserBookmarkStore((state) => state.moveBookmarks);
+  const refresh = useBrowserBookmarkStore((state) => state.refresh);
 
-  // 初始化
+  const filtered = useFilteredBookmarks();
+  const tags = React.useMemo(() => selectAllTags(meta).slice(0, 30), [meta]);
+  const editingNode = editingId ? bookmarks.find((b) => b.id === editingId) : null;
+
+  // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {
-    const init = async () => {
-      try {
-        await initDatabase();
-        initializeTheme();
-        await Promise.all([loadBookmarks(), loadFolders(), loadTags()]);
-        setIsInitialized(true);
-      } catch (error) {
-        console.error('Failed to initialize:', error);
-      }
-    };
-    init();
-  }, [loadBookmarks, loadFolders, loadTags]);
+    initializeTheme();
+    void useBrowserBookmarkStore.getState().init();
+  }, []);
 
-  // 处理视图切换
-  const handleViewChange = (view: ViewType) => {
-    setCurrentView(view);
-    setSearchQuery('');
-    setSelectedFolderId(undefined);
-    setSelectedTag(undefined);
+  const activeView: ViewType =
+    filter === 'tag' && selectedTag
+      ? 'tag'
+      : currentFolderId
+        ? 'folder'
+        : filter === 'broken' || filter === 'favorites' || filter === 'recent'
+          ? filter
+          : 'all';
 
-    if (view === 'add') return;
-
-    clearFilters();
-
-    switch (view) {
-      case 'favorites':
-        setFilters({ isFavorite: true });
-        break;
-      case 'recent':
-        break;
-      case 'broken':
-        setFilters({ status: 'broken' });
-        break;
-      default:
-        break;
-    }
+  const handleQuickView = (view: 'all' | 'recent' | 'favorites' | 'broken') => {
+    setFilter(view);
   };
 
-  // 处理文件夹选择
-  const handleFolderSelect = (folderId: string) => {
-    setCurrentView('folder');
-    setSelectedFolderId(folderId);
-    setSelectedTag(undefined);
-    setCurrentFolder(folderId);
-  };
-
-  // 处理标签选择
   const handleTagSelect = (tag: string) => {
-    setCurrentView('tag');
-    setSelectedTag(tag);
-    setSelectedFolderId(undefined);
-    clearFilters();
+    setFilter('tag', tag);
   };
 
-  // 处理搜索
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    if (query.trim()) {
-      search(query);
-    } else {
-      loadBookmarks();
+  // 编辑保存：标题/URL 走 chrome.bookmarks，文件夹走 move，标签走 aux
+  const handleEditSubmit = async (value: {
+    url: string;
+    title: string;
+    folderId?: string;
+    tags: string[];
+  }) => {
+    if (!editingNode) return;
+    const store = useBrowserBookmarkStore.getState();
+    await updateBookmark(editingNode.id, { title: value.title, url: value.url });
+    if (value.folderId && value.folderId !== editingNode.parentId) {
+      await moveBookmarks([editingNode.id], value.folderId);
     }
+    const currentTags = meta[editingNode.id]?.tags ?? [];
+    if (JSON.stringify([...currentTags].sort()) !== JSON.stringify([...value.tags].sort())) {
+      await store.addTags([editingNode.id], value.tags);
+      for (const tag of currentTags) {
+        if (!value.tags.includes(tag)) {
+          await store.removeTag(editingNode.id, tag);
+        }
+      }
+    }
+    setEditingId(null);
   };
 
-  // 处理添加书签
-  const handleAddBookmark = async (dto: Parameters<typeof createBookmark>[0]) => {
-    await createBookmark(dto);
-    setCurrentView('all');
-  };
-
-  // 处理导入
-  const handleImport = async () => {
-    setIsImporting(true);
-    try {
-      const { bookmarkService } = await import('@/services');
-      const result = await bookmarkService.importFromBrowser();
-      console.log('Import result:', result);
-      await refresh();
-    } catch (error) {
-      console.error('Import failed:', error);
-    } finally {
-      setIsImporting(false);
+  // 添加书签（写 chrome.bookmarks，标签写 aux）
+  const handleAddSubmit = async (value: {
+    url: string;
+    title: string;
+    folderId?: string;
+    tags: string[];
+  }) => {
+    const store = useBrowserBookmarkStore.getState();
+    await store.addBookmark({ url: value.url, title: value.title, parentId: value.folderId });
+    if (value.tags.length > 0) {
+      const created = store.bookmarks.find((bookmark) => bookmark.url === value.url);
+      if (created) {
+        await store.addTags([created.id], value.tags);
+      }
     }
-  };
-
-  // 获取过滤后的书签
-  const getFilteredBookmarks = () => {
-    let filtered = bookmarks;
-
-    if (currentView === 'recent') {
-      filtered = [...bookmarks].sort((a, b) => b.createdAt - a.createdAt).slice(0, 50);
-    }
-
-    if (currentView === 'tag' && selectedTag) {
-      filtered = bookmarks.filter((b) => b.tags.includes(selectedTag));
-    }
-
-    return filtered;
-  };
-
-  // 获取视图标题
-  const getViewTitle = () => {
-    switch (currentView) {
-      case 'all':
-        return '全部书签';
-      case 'favorites':
-        return '收藏';
-      case 'recent':
-        return '最近添加';
-      case 'broken':
-        return '失效链接';
-      case 'folder':
-        return '文件夹';
-      case 'tag':
-        return `标签: ${selectedTag}`;
-      case 'add':
-        return '添加书签';
-      default:
-        return '书签';
-    }
+    setIsAddOpen(false);
   };
 
   if (!isInitialized) {
     return (
-      <div className="sidepanel-container flex items-center justify-center bg-background">
+      <div className="flex-1 flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-2">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           <span className="text-sm text-muted-foreground">加载中...</span>
@@ -197,338 +139,317 @@ export function App() {
   }
 
   return (
-    <div className="sidepanel-container flex bg-background">
-      {/* Sidebar */}
-      <aside
-        className={cn(
-          'flex flex-col border-r bg-muted/30 transition-all duration-200',
-          sidebarCollapsed ? 'w-12' : 'w-56'
-        )}
-      >
-        {/* Logo */}
-        <div className="flex items-center gap-2 border-b px-3 py-3">
-          <Bookmark className="h-5 w-5 text-primary flex-shrink-0" />
-          {!sidebarCollapsed && <span className="font-semibold text-sm">智能书签</span>}
+    <div className="flex h-screen flex-col bg-background">
+      {/* Header */}
+      <header className="flex items-center gap-2 border-b px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Bookmark className="h-5 w-5 text-primary" />
+          <span className="font-semibold text-sm">智能书签</span>
         </div>
+        <div className="flex-1" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          title="刷新"
+          onClick={() => void refresh()}
+        >
+          <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          title="设置"
+          onClick={() => chrome.runtime.openOptionsPage()}
+        >
+          <Settings className="h-4 w-4" />
+        </Button>
+        <Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setIsAddOpen(true)}>
+          <Plus className="h-4 w-4" />
+          添加
+        </Button>
+      </header>
 
-        <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
-            {/* Quick Links */}
-            <SidebarItem
-              icon={<FolderOpen className="h-4 w-4" />}
-              label="全部"
-              active={currentView === 'all'}
-              collapsed={sidebarCollapsed}
-              onClick={() => handleViewChange('all')}
-            />
-            <SidebarItem
-              icon={<Clock className="h-4 w-4" />}
-              label="最近"
-              active={currentView === 'recent'}
-              collapsed={sidebarCollapsed}
-              onClick={() => handleViewChange('recent')}
-            />
-            <SidebarItem
-              icon={<Heart className="h-4 w-4" />}
-              label="收藏"
-              active={currentView === 'favorites'}
-              collapsed={sidebarCollapsed}
-              onClick={() => handleViewChange('favorites')}
-            />
-            <SidebarItem
-              icon={<AlertTriangle className="h-4 w-4" />}
-              label="失效"
-              active={currentView === 'broken'}
-              collapsed={sidebarCollapsed}
-              onClick={() => handleViewChange('broken')}
-            />
+      {/* 搜索栏 */}
+      <div className="px-3 py-2 border-b">
+        <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="搜索书签..." />
+      </div>
 
-            {/* Divider */}
-            <div className="my-2 h-px bg-border" />
-
-            {/* Folders */}
-            {!sidebarCollapsed && (
-              <div className="space-y-1">
-                <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
-                  文件夹
-                </div>
-                {folderTree.length > 0 ? (
-                  folderTree.map((folder) => (
-                    <FolderTreeItem
-                      key={folder.id}
-                      folder={folder}
-                      selectedId={selectedFolderId}
-                      onSelect={handleFolderSelect}
-                    />
-                  ))
-                ) : (
-                  <div className="px-2 py-1 text-xs text-muted-foreground">
-                    暂无文件夹
-                  </div>
-                )}
+      <div className="flex flex-1 overflow-hidden">
+        {/* 侧栏：快速视图 + 文件夹树 + 标签 */}
+        <aside className="w-48 border-r bg-muted/30 overflow-hidden">
+          <ScrollArea className="h-full">
+            <div className="p-2 space-y-4">
+              <div className="space-y-0.5">
+                <SidebarItem
+                  icon={<FolderOpen className="h-4 w-4" />}
+                  label="全部书签"
+                  count={bookmarks.length}
+                  active={activeView === 'all'}
+                  onClick={() => handleQuickView('all')}
+                />
+                <SidebarItem
+                  icon={<Clock className="h-4 w-4" />}
+                  label="最近添加"
+                  active={activeView === 'recent'}
+                  onClick={() => handleQuickView('recent')}
+                />
+                <SidebarItem
+                  icon={<Heart className="h-4 w-4" />}
+                  label="收藏"
+                  active={activeView === 'favorites'}
+                  onClick={() => handleQuickView('favorites')}
+                />
+                <SidebarItem
+                  icon={<AlertTriangle className="h-4 w-4" />}
+                  label="失效链接"
+                  active={activeView === 'broken'}
+                  onClick={() => handleQuickView('broken')}
+                />
               </div>
-            )}
 
-            {/* Divider */}
-            {!sidebarCollapsed && <div className="my-2 h-px bg-border" />}
-
-            {/* Tags */}
-            {!sidebarCollapsed && (
-              <div className="space-y-1">
-                <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
-                  热门标签
-                </div>
-                <div className="flex flex-wrap gap-1 px-2">
-                  {popularTags.slice(0, 8).map((tag) => (
-                    <Badge
-                      key={tag.id}
-                      variant={selectedTag === tag.name ? 'default' : 'secondary'}
-                      className="cursor-pointer text-xs"
-                      onClick={() => handleTagSelect(tag.name)}
-                    >
-                      {tag.name}
-                      <span className="ml-1 text-[10px] opacity-60">{tag.usageCount}</span>
-                    </Badge>
+              {/* 文件夹树 */}
+              <div>
+                <div className="px-2 py-1 text-xs font-medium text-muted-foreground">文件夹</div>
+                <div className="space-y-0.5">
+                  {tree.map((node) => (
+                    <FolderTreeItem
+                      key={node.id}
+                      node={node}
+                      activeFolderId={currentFolderId}
+                      onSelect={setCurrentFolder}
+                    />
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-        </ScrollArea>
 
-        {/* Sidebar Footer */}
-        <div className="border-t p-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start gap-2"
-            onClick={toggleSidebar}
-          >
-            <ChevronRight
-              className={cn('h-4 w-4 transition-transform', !sidebarCollapsed && 'rotate-180')}
-            />
-            {!sidebarCollapsed && <span className="text-xs">收起</span>}
-          </Button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <header className="flex items-center gap-3 border-b px-4 py-3">
-          <h1 className="font-semibold">{getViewTitle()}</h1>
-          <div className="flex-1" />
-
-          {currentView !== 'add' && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1"
-                onClick={handleImport}
-                disabled={isImporting}
-              >
-                <Import className="h-4 w-4" />
-                {isImporting ? '导入中...' : '导入'}
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => refresh()}
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => chrome.runtime.openOptionsPage()}
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                className="gap-1"
-                onClick={() => handleViewChange('add')}
-              >
-                <Plus className="h-4 w-4" />
-                添加
-              </Button>
-            </>
-          )}
-        </header>
-
-        {/* Search Bar */}
-        {currentView !== 'add' && (
-          <div className="px-4 py-3 border-b">
-            <SearchBar
-              value={searchQuery}
-              onChange={handleSearch}
-              placeholder="搜索书签..."
-            />
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="flex-1 overflow-hidden">
-          {currentView === 'add' ? (
-            <div className="p-4">
-              <AddBookmarkForm
-                onSubmit={handleAddBookmark}
-                onCancel={() => handleViewChange('all')}
-              />
+              {/* 标签 */}
+              {tags.length > 0 && (
+                <div>
+                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground">标签</div>
+                  <div className="flex flex-wrap gap-1 px-1">
+                    {tags.map((tag) => (
+                      <Badge
+                        key={tag.name}
+                        variant={selectedTag === tag.name ? 'default' : 'secondary'}
+                        className="cursor-pointer text-xs"
+                        onClick={() => handleTagSelect(tag.name)}
+                      >
+                        <TagIcon className="h-3 w-3 mr-0.5" />
+                        {tag.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
-            <BookmarkList
-              bookmarks={getFilteredBookmarks()}
-              isLoading={isLoading}
-              selectedIds={selectedIds}
-              onSelect={toggleSelect}
-              onFavorite={toggleFavorite}
-              onEdit={openEditBookmark}
-              onDelete={deleteBookmark}
-              emptyMessage={getEmptyMessage(currentView)}
-              maxHeight="calc(100vh - 180px)"
-            />
-          )}
-        </div>
+          </ScrollArea>
+        </aside>
 
-        {/* Footer */}
-        <footer className="border-t px-4 py-2">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{getFilteredBookmarks().length} 个书签</span>
-            {selectedIds.size > 0 && (
-              <span className="text-primary">已选择 {selectedIds.size} 项</span>
-            )}
-          </div>
+        {/* 主内容区 */}
+        <main className="flex-1 overflow-hidden p-2">
+          <BrowserBookmarkList
+            bookmarks={filtered}
+            meta={meta}
+            isLoading={isLoading}
+            selectedIds={selectedIds}
+            onSelect={toggleSelect}
+            onFavorite={toggleFavorite}
+            onEdit={setEditingId}
+            onDelete={(id) => void removeBookmarks([id])}
+            onOpen={(id) => void useBrowserBookmarkStore.getState().recordVisit(id)}
+            onTagClick={handleTagSelect}
+            emptyMessage={getEmptyMessage(activeView, selectedTag)}
+            maxHeight="100%"
+          />
+        </main>
+      </div>
+
+      {/* 底部：批量操作 */}
+      {selectedIds.size > 0 && (
+        <footer className="border-t px-3 py-2 flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">已选 {selectedIds.size} 项</span>
+          <div className="flex-1" />
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearSelection}>
+            取消选择
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => {
+              void removeBookmarks([...selectedIds]);
+              clearSelection();
+            }}
+          >
+            删除所选
+          </Button>
         </footer>
-      </main>
+      )}
+
+      {/* 编辑书签对话框 */}
+      {editingNode && (
+        <Dialog title="编辑书签" onClose={() => setEditingId(null)}>
+          <BrowserBookmarkForm
+            initial={editingNode}
+            initialTags={meta[editingNode.id]?.tags ?? []}
+            folders={folders.map((folder) => ({
+              id: folder.id,
+              title: folder.title,
+              path: folder.path,
+            }))}
+            onSubmit={handleEditSubmit}
+            onCancel={() => setEditingId(null)}
+          />
+        </Dialog>
+      )}
+
+      {/* 添加书签对话框 */}
+      {isAddOpen && (
+        <Dialog title="添加书签" onClose={() => setIsAddOpen(false)}>
+          <BrowserBookmarkForm
+            folders={folders.map((folder) => ({
+              id: folder.id,
+              title: folder.title,
+              path: folder.path,
+            }))}
+            onSubmit={handleAddSubmit}
+            onCancel={() => setIsAddOpen(false)}
+          />
+        </Dialog>
+      )}
     </div>
   );
 }
 
-// 侧边栏项目
-function SidebarItem({
-  icon,
-  label,
-  active,
-  collapsed,
-  onClick,
-  count,
+// 通用对话框
+function Dialog({
+  title,
+  onClose,
+  children,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  collapsed: boolean;
-  onClick: () => void;
-  count?: number;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
 }) {
   return (
-    <Button
-      variant={active ? 'secondary' : 'ghost'}
-      size="sm"
-      className={cn(
-        'w-full justify-start gap-2',
-        collapsed && 'justify-center px-0',
-        active && 'bg-primary/10'
-      )}
-      onClick={onClick}
-      title={collapsed ? label : undefined}
-    >
-      {icon}
-      {!collapsed && (
-        <>
-          <span className="flex-1 text-left text-sm">{label}</span>
-          {count !== undefined && (
-            <span className="text-xs text-muted-foreground">{count}</span>
-          )}
-        </>
-      )}
-    </Button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-lg bg-background border shadow-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">{title}</h2>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 
-// 文件夹树项目
-function FolderTreeItem({
-  folder,
-  selectedId,
-  onSelect,
-  level = 0,
+// 侧栏快速视图项
+function SidebarItem({
+  icon,
+  label,
+  count,
+  active,
+  onClick,
 }: {
-  folder: FolderTreeNode;
-  selectedId?: string;
-  onSelect: (id: string) => void;
-  level?: number;
+  icon: React.ReactNode;
+  label: string;
+  count?: number;
+  active: boolean;
+  onClick: () => void;
 }) {
-  const [isExpanded, setIsExpanded] = React.useState(false);
-  const hasChildren = folder.children.length > 0;
+  return (
+    <button
+      className={cn(
+        'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors',
+        active ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-accent'
+      )}
+      onClick={onClick}
+    >
+      {icon}
+      <span className="flex-1 text-left">{label}</span>
+      {count !== undefined && <span className="text-xs text-muted-foreground">{count}</span>}
+    </button>
+  );
+}
+
+// 文件夹树节点（递归）
+function FolderTreeItem({
+  node,
+  activeFolderId,
+  onSelect,
+  depth = 0,
+}: {
+  node: BrowserTreeNode;
+  activeFolderId?: string;
+  onSelect: (folderId: string | undefined) => void;
+  depth?: number;
+}) {
+  const [isExpanded, setIsExpanded] = React.useState(depth < 2);
+  const childFolders = node.children.filter((child) => !child.url);
+  const bookmarkCount = node.children.filter((child) => child.url).length;
 
   return (
     <div>
-      <Button
-        variant={selectedId === folder.id ? 'secondary' : 'ghost'}
-        size="sm"
+      <div
         className={cn(
-          'w-full justify-start gap-1 h-8',
-          selectedId === folder.id && 'bg-primary/10'
+          'flex items-center gap-1 px-2 py-1.5 rounded-md text-sm cursor-pointer transition-colors',
+          activeFolderId === node.id ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-accent'
         )}
-        style={{ paddingLeft: `${8 + level * 12}px` }}
-        onClick={() => onSelect(folder.id)}
+        style={{ paddingLeft: `${8 + depth * 12}px` }}
+        onClick={() => onSelect(activeFolderId === node.id ? undefined : node.id)}
       >
-        {hasChildren ? (
-          <button
-            className="p-0.5 hover:bg-accent rounded"
+        {childFolders.length > 0 ? (
+          <ChevronRight
+            className={cn(
+              'h-3.5 w-3.5 shrink-0 transition-transform',
+              isExpanded && 'rotate-90'
+            )}
             onClick={(e) => {
               e.stopPropagation();
               setIsExpanded(!isExpanded);
             }}
-          >
-            <ChevronRight
-              className={cn('h-3 w-3 transition-transform', isExpanded && 'rotate-90')}
-            />
-          </button>
+          />
         ) : (
-          <span className="w-4" />
+          <span className="w-3.5" />
         )}
-        <span className="text-sm">{folder.icon || '📁'}</span>
-        <span className="flex-1 text-left text-sm truncate">{folder.name}</span>
-        <span className="text-xs text-muted-foreground">{folder.bookmarkCount}</span>
-      </Button>
-
-      {isExpanded && hasChildren && (
-        <div>
-          {folder.children.map((child) => (
-            <FolderTreeItem
-              key={child.id}
-              folder={child}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              level={level + 1}
-            />
-          ))}
-        </div>
-      )}
+        <FolderOpen className="h-4 w-4 shrink-0" />
+        <span className="flex-1 truncate text-left">{node.title}</span>
+        {bookmarkCount > 0 && <span className="text-xs text-muted-foreground">{bookmarkCount}</span>}
+      </div>
+      {isExpanded &&
+        childFolders.map((child) => (
+          <FolderTreeItem
+            key={child.id}
+            node={child}
+            activeFolderId={activeFolderId}
+            onSelect={onSelect}
+            depth={depth + 1}
+          />
+        ))}
     </div>
   );
 }
 
-// 获取空状态消息
-function getEmptyMessage(view: ViewType): string {
+// 空状态文案
+function getEmptyMessage(view: ViewType, selectedTag?: string): string {
   switch (view) {
     case 'favorites':
       return '暂无收藏的书签';
     case 'recent':
       return '暂无最近添加的书签';
     case 'broken':
-      return '没有失效的链接 🎉';
-    case 'folder':
-      return '该文件夹暂无书签';
+      return '没有失效的链接';
     case 'tag':
-      return '没有带此标签的书签';
+      return `没有标签为 "${selectedTag}" 的书签`;
+    case 'folder':
+      return '此文件夹为空';
     default:
-      return '暂无书签，点击"导入"从浏览器导入';
+      return '暂无书签';
   }
 }
 

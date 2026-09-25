@@ -1,4 +1,4 @@
-import type { CreateBookmarkDTO } from '@/types';
+// 右键菜单：直接把页面/链接加入浏览器书签栏
 
 type ContextMenusApi = {
   removeAll: (callback: () => void) => void;
@@ -13,21 +13,19 @@ type ContextMenusApi = {
   };
 };
 
-type BookmarkServiceLike = {
-  create: (payload: CreateBookmarkDTO) => Promise<unknown>;
-};
+type CreateBookmarkFn = (input: { url: string; title: string }) => Promise<unknown>;
 
 type LoggerLike = Pick<Console, 'log' | 'error'>;
 
 interface ContextMenuDeps {
   contextMenus?: ContextMenusApi;
-  bookmarkService: BookmarkServiceLike;
+  createBookmark: CreateBookmarkFn;
   logger?: LoggerLike;
 }
 
 export function setupContextMenu({
   contextMenus,
-  bookmarkService,
+  createBookmark,
   logger = console,
 }: ContextMenuDeps): void {
   if (!contextMenus) {
@@ -41,32 +39,19 @@ export function setupContextMenu({
       contexts: ['page', 'link'],
     });
 
-    contextMenus.create({
-      id: 'add-bookmark-with-tags',
-      title: '添加书签并设置标签...',
-      contexts: ['page', 'link'],
-    });
-
     contextMenus.onClicked.addListener(async (info, tab) => {
-      if (!tab?.url) {
+      if (info.menuItemId !== 'add-bookmark') {
         return;
       }
 
-      const url = info.linkUrl || info.pageUrl || tab.url;
-      const title = tab.title || url;
+      const url = info.linkUrl || info.pageUrl || tab?.url;
+      if (!url) {
+        return;
+      }
 
       try {
-        if (info.menuItemId === 'add-bookmark' || info.menuItemId === 'add-bookmark-with-tags') {
-          await bookmarkService.create({
-            url,
-            title,
-            favicon: tab.favIconUrl,
-          });
-
-          if (info.menuItemId === 'add-bookmark') {
-            logger.log('[Background] Bookmark added:', url);
-          }
-        }
+        await createBookmark({ url, title: tab?.title || url });
+        logger.log('[Background] Bookmark added:', url);
       } catch (error) {
         logger.error('[Background] Failed to add bookmark:', error);
       }

@@ -1,13 +1,14 @@
 // Popup 主应用组件
+// v0.6：数据来自 chrome.bookmarks（唯一数据源），通过 browserBookmarkStore 访问
 
 import * as React from 'react';
 import { Plus, Settings, Bookmark, Heart, Clock, AlertTriangle, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { SearchBar } from '@/components/search/SearchBar';
-import { BookmarkList } from '@/components/bookmark/BookmarkList';
-import { AddBookmarkForm } from '@/components/bookmark/AddBookmarkForm';
-import { useBookmarkStore, useFolderStore, useTagStore, useUIStore, initializeTheme } from '@/stores';
-import { initDatabase } from '@/lib/database';
+import { BrowserBookmarkList } from '@/components/bookmark/BrowserBookmarkList';
+import { BrowserBookmarkForm } from '@/components/bookmark/BrowserBookmarkForm';
+import { useFilteredBookmarks } from '@/components/bookmark/useBookmarkFilter';
+import { useBrowserBookmarkStore, initializeTheme } from '@/stores';
 import { cn } from '@/lib/utils';
 import '@/styles/globals.css';
 
@@ -15,88 +16,61 @@ type ViewType = 'all' | 'favorites' | 'recent' | 'broken' | 'add';
 
 export function App() {
   const [currentView, setCurrentView] = React.useState<ViewType>('all');
-  const [searchQuery, setSearchQuery] = React.useState('');
-  const [isInitialized, setIsInitialized] = React.useState(false);
 
-  const {
-    bookmarks,
-    isLoading,
-    selectedIds,
-    loadBookmarks,
-    search,
-    toggleSelect,
-    toggleFavorite,
-    deleteBookmark,
-    createBookmark,
-    setFilters,
-    clearFilters,
-  } = useBookmarkStore();
+  const isInitialized = useBrowserBookmarkStore((state) => state.isInitialized);
+  const isLoading = useBrowserBookmarkStore((state) => state.isLoading);
+  const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
+  const folders = useBrowserBookmarkStore((state) => state.folders);
+  const meta = useBrowserBookmarkStore((state) => state.meta);
+  const selectedIds = useBrowserBookmarkStore((state) => state.selectedIds);
 
-  const { loadFolders } = useFolderStore();
-  const { loadTags } = useTagStore();
-  const { openEditBookmark } = useUIStore();
+  const setSearchQuery = useBrowserBookmarkStore((state) => state.setSearchQuery);
+  const setFilter = useBrowserBookmarkStore((state) => state.setFilter);
+  const toggleSelect = useBrowserBookmarkStore((state) => state.toggleSelect);
+  const toggleFavorite = useBrowserBookmarkStore((state) => state.toggleFavorite);
+  const removeBookmarks = useBrowserBookmarkStore((state) => state.removeBookmarks);
+  const recordVisit = useBrowserBookmarkStore((state) => state.recordVisit);
 
-  // 初始化
+  const filtered = useFilteredBookmarks();
+  const searchQuery = useBrowserBookmarkStore((state) => state.searchQuery);
+
+  // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {
-    const init = async () => {
-      try {
-        await initDatabase();
-        initializeTheme();
-        await Promise.all([loadBookmarks(), loadFolders(), loadTags()]);
-        setIsInitialized(true);
-      } catch (error) {
-        console.error('Failed to initialize:', error);
-      }
-    };
-    init();
-  }, [loadBookmarks, loadFolders, loadTags]);
+    initializeTheme();
+    void useBrowserBookmarkStore.getState().init();
+  }, []);
 
   // 处理视图切换
   const handleViewChange = (view: ViewType) => {
     setCurrentView(view);
     setSearchQuery('');
-
-    if (view === 'add') return;
-
-    clearFilters();
-
-    switch (view) {
-      case 'favorites':
-        setFilters({ isFavorite: true });
-        break;
-      case 'recent':
-        // 最近添加的书签（默认排序）
-        break;
-      case 'broken':
-        setFilters({ status: 'broken' });
-        break;
-      default:
-        break;
+    if (view !== 'add') {
+      const filter = view === 'all' ? 'all' : view === 'recent' ? 'recent' : view;
+      setFilter(filter as 'all' | 'recent' | 'favorites' | 'broken');
     }
   };
 
   // 处理搜索
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    if (query.trim()) {
-      search(query);
-    } else {
-      loadBookmarks();
-    }
   };
 
-  // 处理添加书签
-  const handleAddBookmark = async (dto: Parameters<typeof createBookmark>[0]) => {
-    await createBookmark(dto);
+  // 处理添加书签（写 chrome.bookmarks，标签写 aux）
+  const handleAddBookmark = async (value: {
+    url: string;
+    title: string;
+    folderId?: string;
+    tags: string[];
+  }) => {
+    const store = useBrowserBookmarkStore.getState();
+    await store.addBookmark({ url: value.url, title: value.title, parentId: value.folderId });
+    if (value.tags.length > 0) {
+      const created = store.bookmarks.find((bookmark) => bookmark.url === value.url);
+      if (created) {
+        await store.addTags([created.id], value.tags);
+      }
+    }
     setCurrentView('all');
-  };
-
-  // 获取过滤后的书签
-  const getFilteredBookmarks = () => {
-    if (currentView === 'recent') {
-      return [...bookmarks].sort((a, b) => b.createdAt - a.createdAt).slice(0, 20);
-    }
-    return bookmarks;
   };
 
   if (!isInitialized) {
@@ -137,7 +111,7 @@ export function App() {
         </Button>
       </header>
 
-      {/* Quick Actions */}
+      {/* 快速过滤 */}
       {currentView !== 'add' && (
         <div className="flex items-center gap-1 border-b px-3 py-2">
           <QuickAction
@@ -167,34 +141,40 @@ export function App() {
         </div>
       )}
 
-      {/* Search Bar */}
+      {/* 搜索栏 */}
       {currentView !== 'add' && (
         <div className="px-3 py-2">
-          <SearchBar
-            value={searchQuery}
-            onChange={handleSearch}
-            placeholder="搜索书签..."
-          />
+          <SearchBar value={searchQuery} onChange={handleSearch} placeholder="搜索书签..." />
         </div>
       )}
 
-      {/* Content */}
+      {/* 内容 */}
       <div className="flex-1 overflow-hidden px-2">
         {currentView === 'add' ? (
-          <AddBookmarkForm
+          <BrowserBookmarkForm
+            folders={folders.map((folder) => ({
+              id: folder.id,
+              title: folder.title,
+              path: folder.path,
+            }))}
             onSubmit={handleAddBookmark}
             onCancel={() => setCurrentView('all')}
             className="p-2"
           />
         ) : (
-          <BookmarkList
-            bookmarks={getFilteredBookmarks()}
+          <BrowserBookmarkList
+            bookmarks={filtered}
+            meta={meta}
             isLoading={isLoading}
             selectedIds={selectedIds}
             onSelect={toggleSelect}
             onFavorite={toggleFavorite}
-            onEdit={openEditBookmark}
-            onDelete={deleteBookmark}
+            onDelete={(id) => void removeBookmarks([id])}
+            onOpen={(id) => void recordVisit(id)}
+            onTagClick={(tag) => {
+              setFilter('tag', tag);
+              setCurrentView('all');
+            }}
             emptyMessage={getEmptyMessage(currentView)}
             compact
             maxHeight="320px"
@@ -205,9 +185,7 @@ export function App() {
       {/* Footer */}
       <footer className="border-t px-3 py-2">
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>
-            {bookmarks.length} 个书签
-          </span>
+          <span>{bookmarks.length} 个书签</span>
           <Button
             variant="link"
             size="sm"

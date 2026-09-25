@@ -1,23 +1,24 @@
+// 快捷键命令处理
+// v0.6：quick-add 直写 chrome.bookmarks；toggle-favorite 通过
+// URL 匹配书签后写 aux 元数据
+
 import { getCurrentPageInfo, getCurrentTab } from '@/lib/messaging';
-import type { CreateBookmarkDTO } from '@/types';
 
 type TabInfo = Awaited<ReturnType<typeof getCurrentTab>>;
 
-type BookmarkServiceLike = {
-  create?: (payload: CreateBookmarkDTO) => Promise<unknown>;
-  getAll?: (options?: { limit?: number }) => Promise<Array<{ id: string; url: string }>>;
-  toggleFavorite?: (id: string) => Promise<unknown>;
-};
-
 export interface CommandHandlerDeps {
-  bookmarkService: Pick<BookmarkServiceLike, 'create' | 'getAll' | 'toggleFavorite'>;
+  // 将当前页加入浏览器书签栏
+  addBookmarkToBar: (input: { url: string; title: string }) => Promise<unknown>;
+  // 按当前页 URL 切换书签收藏（aux 元数据），返回切换后的收藏状态
+  toggleFavoriteByUrl: (url: string) => Promise<boolean>;
   getCurrentPageInfo: typeof getCurrentPageInfo;
   queryActiveTab: (queryInfo: chrome.tabs.QueryInfo) => Promise<TabInfo[]>;
   openSidePanel: (options: { windowId: number }) => Promise<void>;
 }
 
 export function createCommandHandler({
-  bookmarkService,
+  addBookmarkToBar,
+  toggleFavoriteByUrl,
   getCurrentPageInfo: resolveCurrentPageInfo,
   queryActiveTab,
   openSidePanel,
@@ -38,12 +39,7 @@ export function createCommandHandler({
         if (!pageInfo) {
           return;
         }
-
-        await bookmarkService.create?.({
-          url: pageInfo.url,
-          title: pageInfo.title,
-          favicon: pageInfo.favicon,
-        });
+        await addBookmarkToBar({ url: pageInfo.url, title: pageInfo.title });
         return;
       }
 
@@ -52,12 +48,7 @@ export function createCommandHandler({
         if (!pageInfo?.url) {
           return;
         }
-
-        const bookmarks = (await bookmarkService.getAll?.({ limit: 1000 })) ?? [];
-        const existing = bookmarks.find((bookmark) => bookmark.url === pageInfo.url);
-        if (existing) {
-          await bookmarkService.toggleFavorite?.(existing.id);
-        }
+        await toggleFavoriteByUrl(pageInfo.url);
         return;
       }
 
@@ -68,11 +59,14 @@ export function createCommandHandler({
 }
 
 export function createDefaultCommandHandler(
-  deps: Pick<CommandHandlerDeps, 'bookmarkService'> &
-    Partial<Pick<CommandHandlerDeps, 'getCurrentPageInfo' | 'queryActiveTab' | 'openSidePanel'>>
+  deps: Pick<CommandHandlerDeps, 'addBookmarkToBar' | 'toggleFavoriteByUrl'> &
+    Partial<
+      Pick<CommandHandlerDeps, 'getCurrentPageInfo' | 'queryActiveTab' | 'openSidePanel'>
+    >
 ) {
   return createCommandHandler({
-    bookmarkService: deps.bookmarkService,
+    addBookmarkToBar: deps.addBookmarkToBar,
+    toggleFavoriteByUrl: deps.toggleFavoriteByUrl,
     getCurrentPageInfo: deps.getCurrentPageInfo ?? getCurrentPageInfo,
     queryActiveTab: deps.queryActiveTab ?? ((queryInfo) => chrome.tabs.query(queryInfo)),
     openSidePanel:
