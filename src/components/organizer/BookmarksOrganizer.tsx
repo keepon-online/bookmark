@@ -11,9 +11,8 @@ import {
   XCircle,
   Loader2,
   Clock,
-  RefreshCw,
 } from 'lucide-react';
-import { organizerService, browserSyncService } from '@/services';
+import { organizerService } from '@/services';
 import type {
   OrganizeOptions,
   OrganizeProgress,
@@ -62,8 +61,6 @@ export function BookmarksOrganizer({
   const [showPreview, setShowPreview] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const [lastAutoOrganize, setLastAutoOrganize] = useState<string | null>(null);
-  const [syncToBrowser, setSyncToBrowser] = useState(true); // 默认同步到浏览器
-  const [syncResult, setSyncResult] = useState<{ moved: number; tagged: number } | null>(null);
   const [lastOrganizeTime, setLastOrganizeTime] = useState<string | null>(null);
 
   // 加载自动整理配置和上次的整理结果
@@ -85,12 +82,9 @@ export function BookmarksOrganizer({
   };
 
   const loadLastOrganizeResult = async () => {
-    const stored = await chrome.storage.local.get(['lastOrganizeResult', 'lastSyncResult', 'lastOrganizeTime']);
+    const stored = await chrome.storage.local.get(['lastOrganizeResult', 'lastOrganizeTime']);
     if (stored.lastOrganizeResult) {
       setResult(stored.lastOrganizeResult);
-    }
-    if (stored.lastSyncResult) {
-      setSyncResult(stored.lastSyncResult);
     }
     if (stored.lastOrganizeTime) {
       setLastOrganizeTime(new Date(stored.lastOrganizeTime).toLocaleString());
@@ -125,7 +119,6 @@ export function BookmarksOrganizer({
     setProgress(null);
     setResult(null);
     setShowPreview(false);
-    setSyncResult(null);
 
     try {
       // 1. 在扩展中整理书签
@@ -144,29 +137,6 @@ export function BookmarksOrganizer({
         lastOrganizeResult: resultData,
         lastOrganizeTime: Date.now(),
       });
-
-      // 2. 如果启用同步，将整理结果同步到浏览器书签栏
-      if (syncToBrowser && resultData.success) {
-        setProgress({ current: 0, total: 100, stage: 'sync', message: '正在同步到浏览器书签栏...' });
-
-        const syncData = await browserSyncService.syncToBrowser({
-          moveBookmarks: options.moveBookmarks,
-          applyTags: options.applyTags,
-        });
-
-        const syncResultData = { moved: syncData.moved, tagged: syncData.tagged };
-
-        if (syncData.success) {
-          setSyncResult(syncResultData);
-          // 保存同步结果到存储
-          await chrome.storage.local.set({
-            lastSyncResult: syncResultData,
-          });
-          console.log('[Organizer] Browser sync completed:', syncData);
-        } else {
-          console.error('[Organizer] Browser sync failed:', syncData.errors);
-        }
-      }
     } catch (error) {
       console.error('整理失败:', error);
     } finally {
@@ -304,19 +274,6 @@ export function BookmarksOrganizer({
                 className="rounded border-gray-300 text-purple-600"
               />
               <span className="text-sm text-gray-700">归档无法分类的书签</span>
-            </label>
-
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={syncToBrowser}
-                onChange={(e) => setSyncToBrowser(e.target.checked)}
-                className="rounded border-gray-300 text-indigo-600"
-              />
-              <span className="text-sm text-gray-700 flex items-center gap-1">
-                <RefreshCw className="w-3 h-3" />
-                同步到浏览器书签栏
-              </span>
             </label>
           </div>
 
@@ -595,35 +552,6 @@ export function BookmarksOrganizer({
               )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* 同步结果 */}
-      {syncResult && (
-        <div className="mb-6 p-4 bg-indigo-50 rounded-lg">
-          <div className="flex items-center gap-2 mb-3">
-            <RefreshCw className="w-5 h-5 text-indigo-600" />
-            <span className="font-medium text-indigo-900">浏览器同步完成</span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="text-center p-2 bg-white rounded">
-              <div className="text-lg font-semibold text-indigo-600">
-                {syncResult.moved}
-              </div>
-              <div className="text-xs text-gray-500">已移动到文件夹</div>
-            </div>
-            <div className="text-center p-2 bg-white rounded">
-              <div className="text-lg font-semibold text-indigo-600">
-                {syncResult.tagged}
-              </div>
-              <div className="text-xs text-gray-500">已添加标签</div>
-            </div>
-          </div>
-
-          <div className="mt-3 text-sm text-indigo-700">
-            ✨ 书签已在浏览器书签栏中更新，打开书签管理器查看效果
-          </div>
         </div>
       )}
 

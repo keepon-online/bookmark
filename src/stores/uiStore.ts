@@ -2,7 +2,9 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ViewMode, Theme } from '@/types';
+
+type ViewMode = 'list' | 'grid';
+type Theme = 'light' | 'dark' | 'system';
 
 interface UIState {
   // 视图设置

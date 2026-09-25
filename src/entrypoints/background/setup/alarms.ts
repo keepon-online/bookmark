@@ -17,10 +17,6 @@ type OrganizerServiceLike = {
   organizeAll: (options?: Record<string, unknown>) => Promise<unknown>;
 };
 
-type BrowserSyncServiceLike = {
-  syncToBrowser: (options: { moveBookmarks: boolean; applyTags: boolean }) => Promise<unknown>;
-};
-
 type LoggerLike = Pick<Console, 'log' | 'error'>;
 
 interface AlarmDeps {
@@ -28,7 +24,6 @@ interface AlarmDeps {
   storage: StorageApi;
   tagService: TagServiceLike;
   organizerService: OrganizerServiceLike;
-  browserSyncService: BrowserSyncServiceLike;
   logger?: LoggerLike;
 }
 
@@ -37,7 +32,6 @@ export function setupAlarms({
   storage,
   tagService,
   organizerService,
-  browserSyncService,
   logger = console,
 }: AlarmDeps): void {
   if (!alarms) {
@@ -90,16 +84,6 @@ export function setupAlarms({
             });
 
             logger.log('[Background] Auto-organize completed:', result);
-
-            try {
-              const syncResult = await browserSyncService.syncToBrowser({
-                moveBookmarks: false,
-                applyTags: true,
-              });
-              logger.log('[Background] Browser sync completed:', syncResult);
-            } catch (syncError) {
-              logger.error('[Background] Browser sync failed:', syncError);
-            }
           } else {
             logger.log('[Background] Auto-organize is disabled');
           }

@@ -6,7 +6,6 @@ import {
   Bookmark,
   Sparkles,
   Wand2,
-  Cloud,
   HeartPulse,
   Settings,
   Info,
@@ -24,7 +23,6 @@ const navItems: NavItem[] = [
   { id: 'bookmarks', label: '书签管理', icon: Bookmark },
   { id: 'ai', label: 'AI 设置', icon: Sparkles },
   { id: 'organizer', label: '智能整理', icon: Wand2 },
-  { id: 'sync', label: '云端同步', icon: Cloud },
   { id: 'health', label: '链接健康', icon: HeartPulse },
   { id: 'advanced', label: '高级设置', icon: Settings },
   { id: 'about', label: '关于', icon: Info },
@@ -87,7 +85,7 @@ export function SidebarNav({ activeTab, setActiveTab }: SidebarNavProps) {
       React.createElement('div', {
         className: 'pt-4 border-t border-gray-200 text-xs text-gray-500',
       },
-        'v0.5.0 Beta'
+        'v0.6.0'
       )
     )
   );

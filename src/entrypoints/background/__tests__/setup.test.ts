@@ -69,9 +69,6 @@ describe('background setup helpers', () => {
       organizerService: {
         organizeAll: vi.fn(),
       },
-      browserSyncService: {
-        syncToBrowser: vi.fn(),
-      },
       logger: { log: vi.fn(), error: vi.fn() },
     });
 
@@ -83,10 +80,9 @@ describe('background setup helpers', () => {
     expect(cleanupUnused).toHaveBeenCalledTimes(1);
   });
 
-  it('auto-organize alarm uses stored config and syncs to browser when enabled', async () => {
+  it('auto-organize alarm uses stored config when enabled', async () => {
     let handleAlarm: ((alarm: chrome.alarms.Alarm) => Promise<void>) | undefined;
     const organizeAll = vi.fn().mockResolvedValue({ organized: 2 });
-    const syncToBrowser = vi.fn().mockResolvedValue({ synced: 2 });
 
     setupAlarms({
       alarms: {
@@ -108,7 +104,6 @@ describe('background setup helpers', () => {
       },
       tagService: { cleanupUnused: vi.fn() },
       organizerService: { organizeAll },
-      browserSyncService: { syncToBrowser },
       logger: { log: vi.fn(), error: vi.fn() },
     });
 
@@ -123,10 +118,6 @@ describe('background setup helpers', () => {
       minConfidence: 0.9,
       archiveUncategorized: false,
       handleBroken: 'ignore',
-    });
-    expect(syncToBrowser).toHaveBeenCalledWith({
-      moveBookmarks: false,
-      applyTags: true,
     });
   });
 

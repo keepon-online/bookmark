@@ -500,7 +500,6 @@ export class BookmarkService {
     const folder = await folderService.create({
       name: node.title,
       parentId,
-      skipBrowserSync: true,
     });
 
     return folder.id;

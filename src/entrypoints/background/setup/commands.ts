@@ -1,4 +1,4 @@
-import { createDefaultCommandHandler } from '../handlers';
+import { createDefaultCommandHandler } from '../messages/commandHandlers';
 
 type CommandsApi = {
   onCommand: {

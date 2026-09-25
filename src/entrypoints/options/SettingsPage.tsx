@@ -7,7 +7,6 @@ import { DashboardSettings } from './components/DashboardSettings';
 import { BookmarksSettings } from './components/BookmarksSettings';
 import { AISettings } from './components/AISettings';
 import { OrganizerSettings } from './components/OrganizerSettings';
-import { SyncSettings } from './components/SyncSettings';
 import { HealthSettings } from './components/HealthSettings';
 import { AdvancedSettings } from './components/AdvancedSettings';
 import { AboutSettings } from './components/AboutSettings';
@@ -17,7 +16,6 @@ type SettingsTab =
   | 'bookmarks'
   | 'ai'
   | 'organizer'
-  | 'sync'
   | 'health'
   | 'advanced'
   | 'about';
@@ -50,7 +48,6 @@ export function SettingsPage() {
       'bookmarks',
       'ai',
       'organizer',
-      'sync',
       'health',
       'advanced',
       'about',
@@ -67,8 +64,6 @@ export function SettingsPage() {
         return React.createElement(AISettings);
       case 'organizer':
         return React.createElement(OrganizerSettings);
-      case 'sync':
-        return React.createElement(SyncSettings);
       case 'health':
         return React.createElement(HealthSettings);
       case 'advanced':

@@ -55,33 +55,6 @@ export function onMessage<TType extends MessageType = MessageType, R = unknown>(
   );
 }
 
-// 广播消息到所有页面
-export async function broadcastMessage<TType extends MessageType>(
-  type: TType,
-  payload?: MessagePayload<TType>
-): Promise<void> {
-  const message: Message<TType> = { type, payload };
-
-  // 发送到所有扩展页面
-  try {
-    await chrome.runtime.sendMessage(message);
-  } catch {
-    // 忽略没有监听器的错误
-  }
-
-  // 发送到所有标签页的 content scripts
-  const tabs = await chrome.tabs.query({});
-  for (const tab of tabs) {
-    if (tab.id) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, message);
-      } catch {
-        // 忽略没有 content script 的标签页
-      }
-    }
-  }
-}
-
 // 获取当前标签页信息
 export async function getCurrentTab(): Promise<chrome.tabs.Tab | null> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

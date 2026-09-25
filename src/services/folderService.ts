@@ -13,39 +13,12 @@ import type {
   CleanupPreviewResult,
   CleanupEmptyFoldersResult,
 } from '@/types';
-import type { FolderSyncSettings } from '@/types/sync';
 
 const logger = createLogger('FolderService');
 
-// 扩展 CreateFolderDTO 支持跳过浏览器同步
-interface CreateFolderOptions extends CreateFolderDTO {
-  skipBrowserSync?: boolean;
-}
-
 export class FolderService {
-  // 文件夹同步服务（延迟加载避免循环依赖）
-  private _folderSyncService: any = null;
-
-  private async getFolderSyncService() {
-    if (!this._folderSyncService) {
-      const { folderSyncService } = await import('./folderSyncService');
-      this._folderSyncService = folderSyncService;
-    }
-    return this._folderSyncService;
-  }
-
-  // 获取文件夹同步设置
-  private async getFolderSyncSettings(): Promise<FolderSyncSettings | undefined> {
-    try {
-      const settings = await chrome.storage.local.get('settings');
-      return settings?.settings?.folderSync;
-    } catch {
-      return undefined;
-    }
-  }
-
   // 创建文件夹
-  async create(dto: CreateFolderOptions): Promise<Folder> {
+  async create(dto: CreateFolderDTO): Promise<Folder> {
     // 检查同名文件夹
     const allFolders = await db.folders.toArray();
     const existing = allFolders.find(f => f.name === dto.name && f.parentId === dto.parentId);
@@ -68,27 +41,9 @@ export class FolderService {
       isSmartFolder: false,
       createdAt: now(),
       updatedAt: now(),
-      syncStatus: 'pending',
     };
 
     await db.folders.add(folder);
-
-    // 自动同步到浏览器
-    if (!dto.skipBrowserSync) {
-      const syncSettings = await this.getFolderSyncSettings();
-      if (syncSettings?.autoSyncToBrowser) {
-        try {
-          const syncService = await this.getFolderSyncService();
-          const result = await syncService.syncFolderToBrowser(folder.id);
-          if (result.success) {
-            folder.browserFolderId = result.browserFolderId;
-            folder.syncStatus = 'synced';
-          }
-        } catch (error) {
-          logger.warn('Auto sync to browser failed', error);
-        }
-      }
-    }
 
     return folder;
   }
@@ -114,19 +69,7 @@ export class FolderService {
     await db.folders.update(id, {
       ...dto,
       updatedAt: now(),
-      syncStatus: 'pending',
     });
-
-    // 同步更新到浏览器
-    const syncSettings = await this.getFolderSyncSettings();
-    if (syncSettings?.autoSyncToBrowser) {
-      try {
-        const syncService = await this.getFolderSyncService();
-        await syncService.syncFolderToBrowser(id);
-      } catch (error) {
-        logger.warn('Auto sync update to browser failed', error);
-      }
-    }
 
     const updated = await db.folders.get(id);
     return updated!;
@@ -137,20 +80,6 @@ export class FolderService {
     const folder = await db.folders.get(id);
     if (!folder) {
       throw new Error('Folder not found');
-    }
-
-    // 同步删除浏览器文件夹
-    if (folder.browserFolderId) {
-      const syncSettings = await this.getFolderSyncSettings();
-      if (syncSettings?.autoSyncToBrowser) {
-        try {
-          await chrome.bookmarks.removeTree(folder.browserFolderId);
-          const syncService = await this.getFolderSyncService();
-          await syncService.removeMappingByDbId(id);
-        } catch (error) {
-          logger.warn('Failed to delete browser folder', error);
-        }
-      }
     }
 
     // 移动文件夹内的书签
@@ -238,7 +167,6 @@ export class FolderService {
 
     const updates: Partial<Folder> = {
       updatedAt: now(),
-      syncStatus: 'pending',
     };
 
     if (newParentId !== undefined) {
@@ -252,16 +180,6 @@ export class FolderService {
     }
 
     await db.folders.update(id, updates);
-
-    const syncSettings = await this.getFolderSyncSettings();
-    if (syncSettings?.autoSyncToBrowser) {
-      try {
-        const syncService = await this.getFolderSyncService();
-        await syncService.syncFolderToBrowser(id);
-      } catch (error) {
-        logger.warn('Auto sync move to browser failed', error);
-      }
-    }
 
     const updated = await db.folders.get(id);
     return updated!;

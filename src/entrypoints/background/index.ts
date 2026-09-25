@@ -2,12 +2,12 @@
 
 import { initDatabase } from '@/lib/database';
 import { onMessage, getCurrentPageInfo } from '@/lib/messaging';
-import { bookmarkService, folderService, tagService, searchService, organizerService, browserSyncService } from '@/services';
+import type { Message, MessageResponse } from '@/types';
+import { bookmarkService, tagService, organizerService } from '@/services';
 import { setupAlarms } from './setup/alarms';
 import { setupBookmarkListeners } from './setup/bookmarkListeners';
 import { setupCommands } from './setup/commands';
 import { setupContextMenu } from './setup/contextMenus';
-import { createBackgroundMessageHandler } from './handlers';
 
 export default defineBackground(() => {
   console.log('[Background] Service Worker started');
@@ -32,7 +32,6 @@ export default defineBackground(() => {
               },
         tagService,
         organizerService,
-        browserSyncService,
       });
       setupCommands({
         commands: typeof chrome !== 'undefined' ? chrome.commands : undefined,
@@ -50,18 +49,22 @@ export default defineBackground(() => {
     }
   }
 
-  // 处理消息
-  const handleMessage = createBackgroundMessageHandler({
-    bookmarkService,
-    folderService,
-    tagService,
-    searchService,
-    getCurrentPageInfo,
-  });
-
-  onMessage(async (message, sender) => {
+  // 处理消息：仅保留后台专属能力（读取当前页面信息）
+  onMessage(async (message: Message, _sender: chrome.runtime.MessageSender): Promise<MessageResponse> => {
     console.log('[Background] Received message:', message.type);
-    return handleMessage(message, sender);
+    if (message.type === 'GET_CURRENT_TAB') {
+      const pageInfo = await getCurrentPageInfo();
+      return {
+        success: true,
+        data: pageInfo,
+        requestId: message.requestId,
+      };
+    }
+    return {
+      success: false,
+      error: `Unknown message type: ${message.type}`,
+      requestId: message.requestId,
+    };
   });
 
   // 启动
