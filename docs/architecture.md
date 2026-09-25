@@ -204,16 +204,15 @@ syncService.download()
 
 // 设计评估
 // ✅ 优点: 清晰的版本控制，索引策略合理
-// ⚠️ 改进: bookmarkTags 表与 Bookmark.tags 功能重复，建议删除
+// ✅ 已处理: bookmarkTags 表已在 v6 中删除（标签直接存于 Bookmark.tags）
 // ⚠️ 改进: 使用 .upgrade() 钩子处理数据迁移，而非重复定义所有表
 ```
 
 **设计分析与优化建议:**
 
-1. **Tag 存储冗余**
-   - 当前: `Bookmark.tags[]` + `bookmarkTags` 中间表
-   - 问题: 代码只使用 `tags`，`bookmarkTags` 未使用
-   - 建议: 删除 `bookmarkTags` 表，简化设计
+1. **Tag 存储冗余（已解决）**
+   - 历史设计: `Bookmark.tags[]` + `bookmarkTags` 中间表
+   - 处理: `bookmarkTags` 表从未被业务代码使用，已在 schema v6 中删除
 
 2. **类型转换**
    - `isFavorite: boolean` 在 IndexedDB 中自动转换为 0/1

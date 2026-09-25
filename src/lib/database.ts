@@ -6,12 +6,6 @@ import type { OrganizeHistory } from '@/types/organizer';
 import type { StatsCache } from '@/types/stats';
 import type { FolderMapping, FolderSyncConflict } from '@/types/sync';
 
-// 书签-标签关联表
-export interface BookmarkTag {
-  bookmarkId: string;
-  tagId: string;
-}
-
 // 链接检查记录
 export interface LinkCheck {
   id: string;
@@ -66,7 +60,6 @@ export class BookmarkDatabase extends Dexie {
   bookmarks!: Table<Bookmark>;
   folders!: Table<Folder>;
   tags!: Table<Tag>;
-  bookmarkTags!: Table<BookmarkTag>;
   linkChecks!: Table<LinkCheck>;
   embeddings!: Table<EmbeddingRecord>;
   syncMeta!: Table<SyncMeta>;
@@ -141,6 +134,12 @@ export class BookmarkDatabase extends Dexie {
       // 新增：文件夹同步冲突表
       folderSyncConflicts: 'id, type, dbFolderId, browserFolderId, resolved, detectedAt',
     });
+
+    // 版本 6：删除未使用的 bookmarkTags 表（标签直接存在 Bookmark.tags 数组中）
+    // 注意：历史版本的 schema 定义保持不变，以保证老用户升级路径完整
+    this.version(6).stores({
+      bookmarkTags: null,
+    });
   }
 }
 
@@ -163,7 +162,6 @@ export async function clearDatabase(): Promise<void> {
   await db.bookmarks.clear();
   await db.folders.clear();
   await db.tags.clear();
-  await db.bookmarkTags.clear();
   await db.linkChecks.clear();
   await db.embeddings.clear();
   await db.syncMeta.clear();
