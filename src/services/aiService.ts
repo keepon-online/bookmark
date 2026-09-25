@@ -338,16 +338,29 @@ export class AIService {
 
   /**
    * 检查书签是否匹配规则
+   * 同类型条件之间为 OR（如多个域名模式），不同类型之间为 AND
    */
   private matchesRule(
     bookmark: Bookmark,
     urlInfo: ReturnType<typeof urlAnalyzer.analyze>,
     rule: ClassificationRule
   ): boolean {
-    // 所有条件都必须匹配 (AND 逻辑)
-    return rule.conditions.every((condition) =>
-      this.matchesCondition(bookmark, urlInfo, condition)
-    );
+    const conditionsByType = new Map<string, ClassificationRule['conditions']>();
+    for (const condition of rule.conditions) {
+      const list = conditionsByType.get(condition.type) ?? [];
+      list.push(condition);
+      conditionsByType.set(condition.type, list);
+    }
+
+    for (const conditions of conditionsByType.values()) {
+      const matched = conditions.some((condition) =>
+        this.matchesCondition(bookmark, urlInfo, condition)
+      );
+      if (!matched) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

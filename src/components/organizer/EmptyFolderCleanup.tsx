@@ -1,383 +1,140 @@
-// 清理空文件夹组件
+// 清理空文件夹组件（v0.6：直接扫描浏览器书签树）
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
-import {
-  FolderX,
-  Search,
-  Trash2,
-  AlertCircle,
-  CheckCircle2,
-  Loader2,
-  Settings,
-  Info,
-} from 'lucide-react';
-import { folderService } from '@/services';
-import type {
-  FindEmptyFoldersOptions,
-  CleanupPreviewResult,
-  CleanupEmptyFoldersResult,
-} from '@/types';
+import { FolderX, Trash2, Search, Loader2, AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
+import { ScrollArea } from '@/components/ui/ScrollArea';
+import { useBrowserBookmarkStore } from '@/stores';
+import { BrowserBookmarksService } from '@/services/browserBookmarksService';
+import type { BrowserBookmarkNode } from '@/types';
+import { formatRelativeTime } from '@/lib/utils';
 
-interface EmptyFolderCleanupProps {
-  className?: string;
-  onComplete?: (result: CleanupEmptyFoldersResult) => void;
-}
+const RECENT_FOLDER_MS = 24 * 3600_000; // 新建文件夹保护窗口
 
-export function EmptyFolderCleanup({
-  className = '',
-  onComplete,
-}: EmptyFolderCleanupProps) {
-  const [options, setOptions] = useState<FindEmptyFoldersOptions>({
-    recursive: true,
-    excludeRoot: true,
-    minAge: 24 * 60 * 60 * 1000, // 默认1天
-  });
+export function EmptyFolderCleanup({ className }: { className?: string }) {
+  const folders = useBrowserBookmarkStore((state) => state.folders);
+  const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
+  const removeFolder = useBrowserBookmarkStore((state) => state.removeFolder);
 
-  const [preview, setPreview] = useState<CleanupPreviewResult | null>(null);
-  const [result, setResult] = useState<CleanupEmptyFoldersResult | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [isCleaning, setIsCleaning] = useState(false);
-  const [showOptions, setShowOptions] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [emptyFolders, setEmptyFolders] = React.useState<BrowserBookmarkNode[] | null>(null);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
-  // 加载上次清理结果
-  useEffect(() => {
-    loadLastCleanupResult();
-  }, []);
-
-  const loadLastCleanupResult = async () => {
-    const stored = await chrome.storage.local.get('lastEmptyFolderCleanup');
-    if (stored.lastEmptyFolderCleanup) {
-      setResult(stored.lastEmptyFolderCleanup);
-    }
+  const handleScan = () => {
+    const now = Date.now();
+    // 只清理叶子空文件夹，且跳过 24 小时内新建的（防止误删使用中的临时文件夹）
+    const found = BrowserBookmarksService.findEmptyFolders(folders, bookmarks).filter(
+      (folder) => !folder.dateAdded || now - folder.dateAdded > RECENT_FOLDER_MS
+    );
+    setEmptyFolders(found);
+    setSelected(new Set(found.map((folder) => folder.id)));
   };
 
-  const saveLastCleanupResult = async (cleanupResult: CleanupEmptyFoldersResult) => {
-    await chrome.storage.local.set({
-      lastEmptyFolderCleanup: cleanupResult,
-      lastEmptyFolderCleanupTime: Date.now(),
+  const toggle = (id: string) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
     });
   };
 
-  // 扫描空文件夹
-  const handleScan = async () => {
-    setIsScanning(true);
+  const handleDelete = async () => {
+    if (selected.size === 0 || !emptyFolders) return;
+    setIsDeleting(true);
     setError(null);
-    setPreview(null);
-    setShowPreview(false);
-
     try {
-      const previewResult = await folderService.previewEmptyFolders(options);
-      setPreview(previewResult);
-      setShowPreview(true);
-
-      if (previewResult.toDelete.length === 0) {
-        setError('没有找到需要清理的空文件夹');
+      for (const id of selected) {
+        await removeFolder(id);
       }
+      setEmptyFolders(null);
+      setSelected(new Set());
     } catch (err) {
-      setError(`扫描失败: ${(err as Error).message}`);
+      setError((err as Error).message);
     } finally {
-      setIsScanning(false);
+      setIsDeleting(false);
     }
   };
 
-  // 执行清理
-  const handleCleanup = async () => {
-    if (!preview) return;
+  return (
+    <Card className={className}>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <FolderX className="h-4 w-4 text-rose-600" />
+          空文件夹清理
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          只清理既无书签也无子文件夹的叶子文件夹；24 小时内新建的会被跳过
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleScan}>
+            <Search className="h-4 w-4 mr-1" />
+            扫描空文件夹
+          </Button>
+          {emptyFolders && emptyFolders.length > 0 && (
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isDeleting || selected.size === 0}
+            >
+              {isDeleting ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-1" />
+              )}
+              删除所选（{selected.size}）
+            </Button>
+          )}
+        </div>
 
-    setIsCleaning(true);
-    setError(null);
+        {error && (
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4" />
+            {error}
+          </div>
+        )}
 
-    try {
-      const cleanupResult = await folderService.deleteEmptyFolders({
-        ...options,
-        dryRun: false,
-      });
+        {emptyFolders && emptyFolders.length === 0 && (
+          <p className="text-sm text-muted-foreground py-4 text-center">没有空文件夹 🎉</p>
+        )}
 
-      setResult(cleanupResult);
-      await saveLastCleanupResult(cleanupResult);
-      setShowPreview(false);
-
-      onComplete?.(cleanupResult);
-
-      // 显示成功消息
-      if (cleanupResult.deleted > 0) {
-        alert(`✅ 清理完成！已删除 ${cleanupResult.deleted} 个空文件夹`);
-      } else {
-        setError('没有文件夹被删除');
-      }
-    } catch (err) {
-      setError(`清理失败: ${(err as Error).message}`);
-    } finally {
-      setIsCleaning(false);
-    }
-  };
-
-  // 格式化时间
-  const formatAge = (ageMs: number): string => {
-    const days = Math.floor(ageMs / (24 * 60 * 60 * 1000));
-    const hours = Math.floor((ageMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-
-    if (days > 0) return `${days}天前创建`;
-    if (hours > 0) return `${hours}小时前创建`;
-    return '刚刚创建';
-  };
-
-  return React.createElement('div', { className: `bg-white rounded-lg shadow p-6 ${className}` },
-    // 标题栏
-    React.createElement('div', { className: 'flex items-center justify-between mb-6' },
-      React.createElement('div', { className: 'flex items-center gap-2' },
-        React.createElement(FolderX, { className: 'w-6 h-6 text-red-500' }),
-        React.createElement('h3', { className: 'text-xl font-semibold text-gray-900' }, '清理空文件夹')
-      ),
-      React.createElement('button', {
-        onClick: () => setShowOptions(!showOptions),
-        className: 'p-2 hover:bg-gray-100 rounded-lg transition-colors',
-      },
-        React.createElement(Settings, { className: 'w-5 h-5 text-gray-600' })
-      )
-    ),
-
-    // 说明文字
-    React.createElement('p', { className: 'text-gray-600 mb-6' },
-      '自动识别并清理空的文件夹，保持书签结构清晰。建议定期清理。'
-    ),
-
-    // 选项面板
-    showOptions ? React.createElement('div', { className: 'mb-6 p-4 bg-gray-50 rounded-lg space-y-4' },
-      // 递归清理
-      React.createElement('label', { className: 'flex items-center gap-3 cursor-pointer' },
-        React.createElement('input', {
-          type: 'checkbox',
-          checked: options.recursive,
-          onChange: (e) => setOptions({ ...options, recursive: e.target.checked }),
-          className: 'w-4 h-4 text-blue-600 rounded',
-        }),
-        React.createElement('div', null,
-          React.createElement('div', { className: 'font-medium text-gray-900' }, '递归清理'),
-          React.createElement('div', { className: 'text-sm text-gray-500' }, '同时清理子文件夹')
-        )
-      ),
-
-      // 排除根目录
-      React.createElement('label', { className: 'flex items-center gap-3 cursor-pointer' },
-        React.createElement('input', {
-          type: 'checkbox',
-          checked: options.excludeRoot,
-          onChange: (e) => setOptions({ ...options, excludeRoot: e.target.checked }),
-          className: 'w-4 h-4 text-blue-600 rounded',
-        }),
-        React.createElement('div', null,
-          React.createElement('div', { className: 'font-medium text-gray-900' }, '排除根目录'),
-          React.createElement('div', { className: 'text-sm text-gray-500' }, '不清理顶级文件夹')
-        )
-      ),
-
-      // 最小存在时间
-      React.createElement('div', { className: 'space-y-2' },
-        React.createElement('label', { className: 'text-sm font-medium text-gray-900' }, '最小存在时间'),
-        React.createElement('select', {
-          value: options.minAge,
-          onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setOptions({ ...options, minAge: Number(e.target.value) }),
-          className: 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500',
-        },
-          React.createElement('option', { value: 0 }, '不限制'),
-          React.createElement('option', { value: 60 * 60 * 1000 }, '1小时'),
-          React.createElement('option', { value: 24 * 60 * 60 * 1000 }, '1天（推荐）'),
-          React.createElement('option', { value: 7 * 24 * 60 * 60 * 1000 }, '7天'),
-          React.createElement('option', { value: 30 * 24 * 60 * 60 * 1000 }, '30天')
-        ),
-        React.createElement('p', { className: 'text-xs text-gray-500' },
-          '只清理超过此时间的文件夹，防止误删新创建的文件夹'
-        )
-      )
-    ) : null,
-
-    // 操作按钮
-    !showPreview ? React.createElement('div', { className: 'flex gap-3' },
-      React.createElement('button', {
-        onClick: handleScan,
-        disabled: isScanning,
-        className: 'flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
-      },
-        isScanning ? React.createElement(Loader2, { className: 'w-5 h-5 animate-spin' })
-          : React.createElement(Search, { className: 'w-5 h-5' }),
-        isScanning ? '扫描中...' : '扫描空文件夹'
-      )
-    ) : null,
-
-    // 预览结果
-    showPreview && preview ? React.createElement('div', { className: 'space-y-4' },
-      // 统计信息
-      React.createElement('div', { className: 'grid grid-cols-2 gap-4' },
-        React.createElement('div', { className: 'bg-red-50 border border-red-200 rounded-lg p-4' },
-          React.createElement('div', { className: 'text-2xl font-bold text-red-600' }, preview.toDelete.length),
-          React.createElement('div', { className: 'text-sm text-red-600' }, '将被删除')
-        ),
-        React.createElement('div', { className: 'bg-green-50 border border-green-200 rounded-lg p-4' },
-          React.createElement('div', { className: 'text-2xl font-bold text-green-600' }, preview.toKeep.length),
-          React.createElement('div', { className: 'text-sm text-green-600' }, '将被保留')
-        )
-      ),
-
-      // 将被删除的文件夹列表
-      preview.toDelete.length > 0 ? React.createElement('div', { className: 'border border-red-200 rounded-lg overflow-hidden' },
-        React.createElement('div', { className: 'bg-red-50 px-4 py-3 border-b border-red-200' },
-          React.createElement('div', { className: 'flex items-center gap-2 font-medium text-red-900' },
-            React.createElement(Trash2, { className: 'w-5 h-5' }),
-            `将被删除的文件夹 (${preview.toDelete.length})`
-          )
-        ),
-        React.createElement('div', { className: 'max-h-64 overflow-y-auto p-2' },
-          ...preview.toDelete.map((info) =>
-            React.createElement('div', {
-              key: info.folder.id,
-              className: 'flex items-center justify-between px-3 py-2 hover:bg-gray-50 rounded-lg',
-            },
-              React.createElement('div', { className: 'flex-1' },
-                React.createElement('div', { className: 'font-medium text-gray-900' }, info.folder.name),
-                React.createElement('div', { className: 'text-sm text-gray-500' },
-                  formatAge(info.age)
-                )
-              ),
-              info.allDescendantsCount > 0 ? React.createElement('div', {
-                className: 'text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded font-medium'
-              },
-                `包含 ${info.allDescendantsCount} 个子文件夹`
-              ) : null
-            )
-          )
-        ),
-
-        // 添加说明：递归删除会同时删除子文件夹
-        preview.toDelete.some(info => info.allDescendantsCount > 0) ? React.createElement('div', {
-          className: 'bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3'
-        },
-          React.createElement('div', { className: 'flex items-start gap-2' },
-            React.createElement(Info, { className: 'w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5' }),
-            React.createElement('div', { className: 'text-sm text-blue-800' },
-              React.createElement('div', { className: 'font-medium mb-1' }, '递归删除说明'),
-              '删除包含子文件夹的父文件夹时，会同时删除所有空的子文件夹。例如：删除"技术/前端/React"时，如果"技术"和"前端"也是空的，会一并删除。'
-            )
-          )
-        ) : null
-      ) : null,
-
-      // 将被保留的文件夹列表
-      preview.toKeep.length > 0 ? React.createElement('div', { className: 'border border-green-200 rounded-lg overflow-hidden' },
-        React.createElement('div', { className: 'bg-green-50 px-4 py-3 border-b border-green-200' },
-          React.createElement('div', { className: 'flex items-center gap-2 font-medium text-green-900' },
-            React.createElement(FolderX, { className: 'w-5 h-5' }),
-            `将被保留的文件夹 (${preview.toKeep.length})`
-          )
-        ),
-        React.createElement('div', { className: 'max-h-64 overflow-y-auto p-2 space-y-1' },
-          ...preview.toKeep.map((info) =>
-            React.createElement('div', {
-              key: info.folder.id,
-              className: 'flex items-start gap-2 px-3 py-2 bg-green-50 rounded-lg',
-            },
-              React.createElement(Info, { className: 'w-5 h-5 text-green-600 flex-shrink-0 mt-0.5' }),
-              React.createElement('div', { className: 'flex-1 min-w-0' },
-                React.createElement('div', { className: 'font-medium text-gray-900' }, info.folder.name),
-                React.createElement('div', { className: 'text-sm text-green-700' },
-                  preview.warnings.find(w => w.includes(info.folder.name)) || '受保护'
-                )
-              )
-            )
-          )
-        )
-      ) : null,
-
-      // 警告信息
-      preview.warnings.length > 0 ? React.createElement('div', { className: 'bg-yellow-50 border border-yellow-200 rounded-lg p-4' },
-        React.createElement('div', { className: 'flex items-start gap-2' },
-          React.createElement(AlertCircle, { className: 'w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5' }),
-          React.createElement('div', { className: 'flex-1' },
-            React.createElement('div', { className: 'font-medium text-yellow-900' }, '注意事项'),
-            preview.warnings.slice(0, 3).map((warning, i) =>
-              React.createElement('div', {
-                key: i,
-                className: 'text-sm text-yellow-800 mt-1'
-              }, warning)
-            ),
-            preview.warnings.length > 3 ? React.createElement('div', { className: 'text-sm text-yellow-800 mt-1' },
-              `...还有 ${preview.warnings.length - 3} 条警告`
-            ) : null
-          )
-        )
-      ) : null,
-
-      // 操作按钮
-      React.createElement('div', { className: 'flex gap-3' },
-        React.createElement('button', {
-          onClick: () => {
-            setShowPreview(false);
-            setPreview(null);
-          },
-          className: 'flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors',
-        }, '取消'),
-        React.createElement('button', {
-          onClick: handleCleanup,
-          disabled: isCleaning || preview.toDelete.length === 0,
-          className: 'flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
-        },
-          isCleaning ? React.createElement(Loader2, { className: 'w-5 h-5 animate-spin' })
-            : React.createElement(Trash2, { className: 'w-5 h-5' }),
-          isCleaning ? '清理中...' : `确认清理 (${preview.toDelete.length})`
-        )
-      )
-    ) : null,
-
-    // 清理结果
-    result ? React.createElement('div', { className: 'mt-6 p-4 bg-gray-50 rounded-lg' },
-      React.createElement('div', { className: 'flex items-center gap-2 mb-3' },
-        result.deleted > 0 ? React.createElement(CheckCircle2, { className: 'w-5 h-5 text-green-600' })
-          : React.createElement(AlertCircle, { className: 'w-5 h-5 text-yellow-600' }),
-        React.createElement('div', { className: 'font-medium text-gray-900' },
-          result.deleted > 0 ? '清理完成' : '清理完成（无操作）'
-        )
-      ),
-      React.createElement('div', { className: 'grid grid-cols-3 gap-4 text-center' },
-        React.createElement('div', null,
-          React.createElement('div', { className: 'text-2xl font-bold text-gray-900' }, result.deleted),
-          React.createElement('div', { className: 'text-sm text-gray-500' }, '已删除')
-        ),
-        React.createElement('div', null,
-          React.createElement('div', { className: 'text-2xl font-bold text-gray-900' }, result.kept),
-          React.createElement('div', { className: 'text-sm text-gray-500' }, '已保留')
-        ),
-        React.createElement('div', null,
-          React.createElement('div', { className: 'text-2xl font-bold text-gray-900' }, `${result.duration}ms`),
-          React.createElement('div', { className: 'text-sm text-gray-500' }, '耗时')
-        )
-      ),
-      result.warnings.length > 0 ? React.createElement('div', { className: 'mt-3 text-sm text-yellow-700' },
-        ...result.warnings.map((w, i) =>
-          React.createElement('div', { key: i }, `⚠️  ${w}`)
-        )
-      ) : null
-    ) : null,
-
-    // 错误提示
-    error ? React.createElement('div', { className: 'mt-4 p-4 bg-red-50 border border-red-200 rounded-lg' },
-      React.createElement('div', { className: 'flex items-center gap-2 text-red-800' },
-        React.createElement(AlertCircle, { className: 'w-5 h-5 flex-shrink-0' }),
-        React.createElement('div', null, error)
-      )
-    ) : null,
-
-    // 上次清理信息
-    result && !showPreview ? React.createElement('div', { className: 'mt-4 text-center' },
-      React.createElement('button', {
-        onClick: () => {
-          setResult(null);
-          setError(null);
-        },
-        className: 'text-sm text-blue-600 hover:text-blue-700',
-      }, '重新扫描')
-    ) : null
+        {emptyFolders && emptyFolders.length > 0 && (
+          <ScrollArea style={{ maxHeight: '320px' }}>
+            <div className="space-y-1">
+              {emptyFolders.map((folder) => (
+                <label
+                  key={folder.id}
+                  className="flex items-center gap-2 rounded-md border p-2 text-sm cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(folder.id)}
+                    onChange={() => toggle(folder.id)}
+                    className="rounded"
+                  />
+                  <span className="flex-1 truncate">{folder.title}</span>
+                  <Badge variant="outline" className="text-xs shrink-0">
+                    {folder.path || '书签栏'}
+                  </Badge>
+                  {folder.dateAdded && (
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      创建于 {formatRelativeTime(folder.dateAdded)}
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </ScrollArea>
+        )}
+      </CardContent>
+    </Card>
   );
 }

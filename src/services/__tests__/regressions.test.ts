@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { db } from '@/lib/database';
+import { auxDb } from '@/lib/auxDatabase';
 import { getUrlKey } from '@/lib/utils';
 import { folderService } from '@/services/folderService';
 import { httpChecker } from '@/lib/httpChecker';
@@ -12,6 +13,8 @@ describe('regressions', () => {
     localStorage.clear();
     await db.delete();
     await db.open();
+    await auxDb.delete();
+    await auxDb.open();
   });
 
   it('findEmptyFolders only returns folders without bookmarks', async () => {
@@ -90,24 +93,25 @@ describe('regressions', () => {
       url: 'https://broken.example.com',
     }));
 
-    await db.bookmarks.add({
+    const node = {
       id: 'bookmark-health',
-      url: 'https://broken.example.com',
-      urlKey: getUrlKey('https://broken.example.com'),
+      parentId: '1',
       title: 'Broken',
-      tags: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      visitCount: 0,
-      isFavorite: false,
-      isArchived: false,
-      status: 'pending',
-      aiGenerated: false,
-    });
+      url: 'https://broken.example.com',
+      index: 0,
+      dateAdded: 100,
+      path: '书签栏',
+    };
 
-    await linkHealthService.checkBookmark('bookmark-health');
+    const results = await linkHealthService.checkBookmarks([node]);
 
-    const updated = await db.bookmarks.get('bookmark-health');
-    expect(updated?.status).toBe('broken');
+    expect(results[0].isAccessible).toBe(false);
+
+    const meta = await auxDb.bookmarkMeta.get('bookmark-health');
+    expect(meta?.linkStatus).toBe('broken');
+
+    const report = await linkHealthService.getHealthReport([node], { 'bookmark-health': meta! });
+    expect(report.broken).toBe(1);
+    expect(report.total).toBe(1);
   });
 });

@@ -1,252 +1,190 @@
-// 链接健康检查服务
+// 链接健康服务 v2
+// 输入浏览器书签节点（chrome.bookmarks 唯一数据源），
+// 检查结果写入 aux（linkChecks 历史 + bookmarkMeta.linkStatus）。
+// 手动触发、可停止、支持跳过近期已检查项。
 
-import { db, type LinkCheck } from '@/lib/database';
 import { httpChecker } from '@/lib/httpChecker';
+import { auxDb, defaultMeta, type LinkCheckRecord } from '@/lib/auxDatabase';
 import { generateId, now } from '@/lib/utils';
-import type {
-  Bookmark,
-  LinkCheckResult,
-  LinkHealthReport,
-  BatchCheckOptions,
-  CheckProgress,
-} from '@/types';
+import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
+import type { BatchCheckOptions, CheckProgress, LinkCheckResult, LinkHealthReport } from '@/types/linkHealth';
+
+const DEFAULT_CONCURRENCY = 5;
 
 export class LinkHealthService {
-  private isRunning = false;
-  private currentProgress: CheckProgress | null = null;
-  private abortController: AbortController | null = null;
+  private stopRequested = false;
+  private running = false;
 
-  /**
-   * 检查单个链接
-   */
-  async checkLink(url: string): Promise<LinkCheckResult> {
-    const result = await httpChecker.check(url);
-    return {
-      bookmarkId: '',
-      ...result,
-    };
+  stopCheck(): void {
+    this.stopRequested = true;
   }
 
-  /**
-   * 检查单个书签
-   */
-  async checkBookmark(bookmarkId: string): Promise<LinkCheckResult | null> {
-    const bookmark = await db.bookmarks.get(bookmarkId);
-    if (!bookmark) return null;
-
-    const result = await httpChecker.check(bookmark.url);
-
-    const checkResult: LinkCheckResult = {
-      bookmarkId,
-      ...result,
-    };
-
-    // 保存检查记录
-    await this.saveCheckResult(checkResult);
-
-    // 更新书签状态
-    await this.updateBookmarkStatus(bookmarkId, result.isAccessible);
-
-    return checkResult;
+  isCheckRunning(): boolean {
+    return this.running;
   }
 
-  /**
-   * 批量检查书签
-   */
-  async checkBatch(
-    bookmarkIds: string[],
+  // 批量检查书签节点：结果写 aux 并返回
+  async checkBookmarks(
+    nodes: BrowserBookmarkNode[],
     options: BatchCheckOptions = {},
     onProgress?: (progress: CheckProgress) => void
   ): Promise<LinkCheckResult[]> {
-    const {
-      batchSize = 10,
-      concurrency = 5,
-      timeout = 5000,
-      retries = 2,
-      skipRecentHours = 24,
-    } = options;
-
-    if (this.isRunning) {
-      throw new Error('A check is already running');
+    if (this.running) {
+      return [];
     }
-
-    this.isRunning = true;
-    this.abortController = new AbortController();
-
-    const results: LinkCheckResult[] = [];
-    const startTime = Date.now();
-
-    // 获取书签
-    let bookmarks = await db.bookmarks.where('id').anyOf(bookmarkIds).toArray();
-
-    // 过滤最近检查过的
-    if (skipRecentHours > 0) {
-      const cutoffTime = Date.now() - skipRecentHours * 60 * 60 * 1000;
-      const allChecks = await db.linkChecks.toArray();
-      const recentChecks = allChecks.filter(c => c.checkedAt && c.checkedAt > cutoffTime);
-      const recentBookmarkIds = new Set(recentChecks.map((c) => c.bookmarkId));
-      bookmarks = bookmarks.filter((b) => !recentBookmarkIds.has(b.id));
-    }
-
-    const total = bookmarks.length;
-    let completed = 0;
-    let success = 0;
-    let failed = 0;
-    const skipped = bookmarkIds.length - total;
-
-    this.currentProgress = {
-      total,
-      completed,
-      current: '',
-      success,
-      failed,
-      skipped,
-      startTime,
-    };
+    this.running = true;
+    this.stopRequested = false;
 
     try {
-      // 分批处理
-      for (let i = 0; i < bookmarks.length; i += batchSize) {
-        if (this.abortController.signal.aborted) {
-          break;
+      const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
+      const skipRecentMs = (options.skipRecentHours ?? 0) * 3600_000;
+
+      // 预取元数据以判断跳过项
+      const metas = await auxDb.bookmarkMeta.bulkGet(nodes.map((node) => node.id));
+      const pending: Array<{ node: BrowserBookmarkNode; meta?: AuxBookmarkMeta }> = [];
+      let skipped = 0;
+      nodes.forEach((node, index) => {
+        if (!node.url) return;
+        const meta = metas[index];
+        if (skipRecentMs > 0 && meta?.linkCheckedAt && now() - meta.linkCheckedAt < skipRecentMs) {
+          skipped++;
+          return;
         }
+        pending.push({ node, meta });
+      });
 
-        const batch = bookmarks.slice(i, i + batchSize);
-        const urls = batch.map((b) => b.url);
+      const results: LinkCheckResult[] = [];
+      const startTime = now();
+      const queue = [...pending];
+      let completed = 0;
+      let success = 0;
+      let failed = 0;
 
-        // 并发检查
-        const checkResults = await httpChecker.checkBatch(urls, {
-          concurrency,
-          timeout,
-          retries,
-        });
+      const worker = async () => {
+        while (queue.length > 0 && !this.stopRequested) {
+          const item = queue.shift();
+          if (!item) break;
 
-        // 处理结果
-        for (let j = 0; j < batch.length; j++) {
-          const bookmark = batch[j];
-          const checkResult = checkResults[j];
+          const check = await httpChecker.check(item.node.url!, {
+            timeout: options.timeout,
+            retries: options.retries,
+          });
 
-          const result: LinkCheckResult = {
-            bookmarkId: bookmark.id,
-            ...checkResult,
+          const record: LinkCheckRecord = {
+            id: generateId(),
+            bookmarkId: item.node.id,
+            status: check.status,
+            isAccessible: check.isAccessible,
+            responseTime: check.responseTime,
+            errorMessage: check.errorMessage,
+            checkedAt: check.checkedAt,
           };
+          await auxDb.linkChecks.add(record);
 
-          results.push(result);
+          const base = item.meta ?? defaultMeta(item.node.id);
+          await auxDb.bookmarkMeta.put({
+            ...base,
+            linkStatus: check.isAccessible ? 'active' : 'broken',
+            linkCheckedAt: check.checkedAt,
+          });
 
-          // 保存检查记录
-          await this.saveCheckResult(result);
-
-          // 更新书签状态
-          await this.updateBookmarkStatus(bookmark.id, checkResult.isAccessible);
+          results.push({
+            bookmarkId: item.node.id,
+            url: check.url,
+            status: check.status,
+            isAccessible: check.isAccessible,
+            responseTime: check.responseTime,
+            errorMessage: check.errorMessage,
+            checkedAt: check.checkedAt,
+          });
 
           completed++;
-          if (checkResult.isAccessible) {
+          if (check.isAccessible) {
             success++;
           } else {
             failed++;
           }
 
-          // 更新进度
-          this.currentProgress = {
-            total,
+          onProgress?.({
+            total: pending.length,
             completed,
-            current: bookmark.url,
+            current: item.node.title || item.node.url!,
             success,
             failed,
             skipped,
             startTime,
-            estimatedRemaining: this.estimateRemaining(startTime, completed, total),
-          };
+            estimatedRemaining:
+              completed > 0
+                ? ((now() - startTime) / completed) * (pending.length - completed)
+                : undefined,
+          });
+        }
+      };
 
-          onProgress?.(this.currentProgress);
+      await Promise.all(
+        Array(Math.min(concurrency, Math.max(pending.length, 1)))
+          .fill(0)
+          .map(() => worker())
+      );
+
+      return results;
+    } finally {
+      this.running = false;
+      this.stopRequested = false;
+    }
+  }
+
+  // 汇总健康报告（基于内存快照 + aux）
+  async getHealthReport(
+    nodes: BrowserBookmarkNode[],
+    meta: Record<string, AuxBookmarkMeta>
+  ): Promise<LinkHealthReport> {
+    let healthy = 0;
+    let broken = 0;
+    const checkedIds: string[] = [];
+
+    for (const node of nodes) {
+      const status = meta[node.id]?.linkStatus;
+      if (status === 'active') {
+        healthy++;
+        checkedIds.push(node.id);
+      } else if (status === 'broken') {
+        broken++;
+        checkedIds.push(node.id);
+      }
+    }
+
+    // 最新一次检查的平均响应时间与时间戳
+    let responseTimeSum = 0;
+    let responseTimeCount = 0;
+    let lastCheckedAt = 0;
+    if (checkedIds.length > 0) {
+      const records = await auxDb.linkChecks.where('bookmarkId').anyOf(checkedIds).toArray();
+      const latestByBookmark = new Map<string, LinkCheckRecord>();
+      for (const record of records) {
+        const existing = latestByBookmark.get(record.bookmarkId);
+        if (!existing || record.checkedAt > existing.checkedAt) {
+          latestByBookmark.set(record.bookmarkId, record);
         }
       }
-    } finally {
-      this.isRunning = false;
-      this.abortController = null;
-      this.currentProgress = null;
+      for (const record of latestByBookmark.values()) {
+        responseTimeSum += record.responseTime;
+        responseTimeCount++;
+        if (record.checkedAt > lastCheckedAt) {
+          lastCheckedAt = record.checkedAt;
+        }
+      }
     }
-
-    return results;
-  }
-
-  /**
-   * 检查所有书签
-   */
-  async checkAllBookmarks(
-    options: BatchCheckOptions = {},
-    onProgress?: (progress: CheckProgress) => void
-  ): Promise<LinkHealthReport> {
-    const allBookmarks = await db.bookmarks.toArray();
-    const bookmarks = allBookmarks.filter(b => !b.isArchived);
-    const bookmarkIds = bookmarks.map((b) => b.id);
-
-    const results = await this.checkBatch(bookmarkIds, options, onProgress);
-
-    return this.generateReport(results);
-  }
-
-  /**
-   * 停止正在进行的检查
-   */
-  stopCheck(): void {
-    if (this.abortController) {
-      this.abortController.abort();
-    }
-  }
-
-  /**
-   * 获取当前进度
-   */
-  getProgress(): CheckProgress | null {
-    return this.currentProgress;
-  }
-
-  /**
-   * 是否正在运行
-   */
-  isCheckRunning(): boolean {
-    return this.isRunning;
-  }
-
-  /**
-   * 获取健康报告
-   */
-  async getHealthReport(): Promise<LinkHealthReport> {
-    const bookmarks = await db.bookmarks.toArray();
-    const total = bookmarks.length;
-
-    const healthy = bookmarks.filter((b) => b.status === 'active').length;
-    const broken = bookmarks.filter((b) => b.status === 'broken').length;
-    const pending = bookmarks.filter((b) => b.status === 'pending').length;
-
-    // 获取最近的检查记录计算平均响应时间
-    const recentChecks = await db.linkChecks
-      .orderBy('checkedAt')
-      .reverse()
-      .limit(100)
-      .toArray();
-
-    const responseTimes = recentChecks
-      .filter((c) => c.responseTime > 0)
-      .map((c) => c.responseTime);
-
-    const avgResponseTime =
-      responseTimes.length > 0
-        ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
-        : 0;
-
-    const lastCheck = recentChecks[0];
 
     return {
-      total,
+      total: nodes.length,
       healthy,
       broken,
-      pending,
-      avgResponseTime,
-      lastCheckedAt: lastCheck?.checkedAt || 0,
+      pending: nodes.length - healthy - broken,
+      avgResponseTime: responseTimeCount > 0 ? responseTimeSum / responseTimeCount : 0,
+      lastCheckedAt,
       byStatus: {
-        unknown: pending,
+        unknown: nodes.length - healthy - broken,
         healthy,
         broken,
         timeout: 0,
@@ -255,127 +193,16 @@ export class LinkHealthService {
     };
   }
 
-  /**
-   * 获取失效链接
-   */
-  async getBrokenLinks(limit = 50): Promise<Bookmark[]> {
-    return db.bookmarks.where('status').equals('broken').limit(limit).toArray();
+  // 单个书签的检查历史（新记录在前）
+  async getCheckHistory(bookmarkId: string, limit = 10): Promise<LinkCheckRecord[]> {
+    const records = await auxDb.linkChecks.where('bookmarkId').equals(bookmarkId).toArray();
+    return records.sort((a, b) => b.checkedAt - a.checkedAt).slice(0, limit);
   }
 
-  /**
-   * 更新 URL
-   */
-  async updateUrl(bookmarkId: string, newUrl: string): Promise<void> {
-    await db.bookmarks.update(bookmarkId, {
-      url: newUrl,
-      status: 'pending',
-      updatedAt: now(),
-    });
-  }
-
-  /**
-   * 标记为已修复
-   */
-  async markAsFixed(bookmarkId: string): Promise<void> {
-    await db.bookmarks.update(bookmarkId, {
-      status: 'active',
-      updatedAt: now(),
-    });
-  }
-
-  /**
-   * 获取书签的检查历史
-   */
-  async getCheckHistory(bookmarkId: string, limit = 10): Promise<LinkCheck[]> {
-    return db.linkChecks
-      .where('bookmarkId')
-      .equals(bookmarkId)
-      .reverse()
-      .limit(limit)
-      .toArray();
-  }
-
-  /**
-   * 清理旧的检查记录
-   */
+  // 清理超过保留天数的检查记录
   async cleanupOldRecords(daysToKeep = 30): Promise<number> {
-    const cutoffTime = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
-    const allRecords = await db.linkChecks.toArray();
-    const oldRecords = allRecords.filter(r => r.checkedAt && r.checkedAt < cutoffTime);
-    const ids = oldRecords.map((r) => r.id);
-    await db.linkChecks.bulkDelete(ids);
-    return ids.length;
-  }
-
-  /**
-   * 保存检查结果
-   */
-  private async saveCheckResult(result: LinkCheckResult): Promise<void> {
-    const check: LinkCheck = {
-      id: generateId(),
-      bookmarkId: result.bookmarkId,
-      status: result.status,
-      isAccessible: result.isAccessible,
-      responseTime: result.responseTime,
-      errorMessage: result.errorMessage,
-      checkedAt: result.checkedAt,
-    };
-
-    await db.linkChecks.add(check);
-  }
-
-  /**
-   * 更新书签状态
-   */
-  private async updateBookmarkStatus(bookmarkId: string, isAccessible: boolean): Promise<void> {
-    await db.bookmarks.update(bookmarkId, {
-      status: isAccessible ? 'active' : 'broken',
-      updatedAt: now(),
-    });
-  }
-
-  /**
-   * 生成报告
-   */
-  private generateReport(results: LinkCheckResult[]): LinkHealthReport {
-    const total = results.length;
-    const healthy = results.filter((r) => r.isAccessible).length;
-    const broken = results.filter((r) => !r.isAccessible).length;
-
-    const responseTimes = results.filter((r) => r.responseTime > 0).map((r) => r.responseTime);
-    const avgResponseTime =
-      responseTimes.length > 0
-        ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
-        : 0;
-
-    return {
-      total,
-      healthy,
-      broken,
-      pending: 0,
-      avgResponseTime,
-      lastCheckedAt: Date.now(),
-      byStatus: {
-        unknown: 0,
-        healthy,
-        broken,
-        timeout: results.filter((r) => r.status === 408).length,
-        error: results.filter((r) => r.status === 0).length,
-      },
-    };
-  }
-
-  /**
-   * 估算剩余时间
-   */
-  private estimateRemaining(startTime: number, completed: number, total: number): number {
-    if (completed === 0) return 0;
-
-    const elapsed = Date.now() - startTime;
-    const avgTimePerItem = elapsed / completed;
-    const remaining = total - completed;
-
-    return Math.round(avgTimePerItem * remaining);
+    const cutoff = now() - daysToKeep * 24 * 3600_000;
+    return auxDb.linkChecks.where('checkedAt').below(cutoff).delete();
   }
 }
 

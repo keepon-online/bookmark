@@ -1,18 +1,11 @@
-// 健康报告组件
+// 健康报告组件（v0.6：检查浏览器书签，结果写 aux）
 
 import * as React from 'react';
-import {
-  Activity,
-  CheckCircle,
-  XCircle,
-  Clock,
-  RefreshCw,
-  TrendingUp,
-  TrendingDown,
-} from 'lucide-react';
+import { Activity, CheckCircle, XCircle, Clock, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
+import { useBrowserBookmarkStore } from '@/stores';
 import { linkHealthService } from '@/services/linkHealthService';
 import type { LinkHealthReport, CheckProgress } from '@/types';
 import {
@@ -30,39 +23,35 @@ interface HealthReportProps {
 }
 
 export function HealthReport({ onCheckAll, className }: HealthReportProps) {
+  const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
+  const meta = useBrowserBookmarkStore((state) => state.meta);
+
   const [report, setReport] = React.useState<LinkHealthReport | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
   const [isChecking, setIsChecking] = React.useState(false);
   const [progress, setProgress] = React.useState<CheckProgress | null>(null);
   const [scanSettings, setScanSettings] = React.useState<ScanSettings>(DEFAULT_SCAN_SETTINGS);
 
   // 加载报告和设置
-  React.useEffect(() => {
-    loadReport();
-    loadScanSettings().then(setScanSettings);
-  }, []);
+  const loadReport = React.useCallback(async () => {
+    const data = await linkHealthService.getHealthReport(bookmarks, meta);
+    setReport(data);
+  }, [bookmarks, meta]);
 
-  const loadReport = async () => {
-    setIsLoading(true);
-    try {
-      const data = await linkHealthService.getHealthReport();
-      setReport(data);
-    } catch (error) {
-      console.error('Failed to load health report:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  React.useEffect(() => {
+    void loadReport();
+    void loadScanSettings().then(setScanSettings);
+  }, [loadReport]);
 
   // 执行全量检查
   const handleCheckAll = async () => {
     setIsChecking(true);
     try {
       const options = toBatchCheckOptions(scanSettings);
-      await linkHealthService.checkAllBookmarks(
-        options,
-        (p) => setProgress(p)
-      );
+      await useBrowserBookmarkStore.getState().init();
+      const nodes = useBrowserBookmarkStore.getState().bookmarks;
+      await linkHealthService.checkBookmarks(nodes, options, setProgress);
+      // 检查结果写入了 aux，刷新 store 的 meta 映射
+      await useBrowserBookmarkStore.getState().refresh();
       await loadReport();
       onCheckAll?.();
     } catch (error) {
@@ -81,28 +70,14 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   // 更新设置
   const handleSettingsChange = (newSettings: ScanSettings) => {
     setScanSettings(newSettings);
-    saveScanSettings(newSettings);
+    void saveScanSettings(newSettings);
   };
-
-  if (isLoading) {
-    return (
-      <Card className={className}>
-        <CardContent className="py-8">
-          <div className="flex items-center justify-center">
-            <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
 
   if (!report) {
     return null;
   }
 
-  const healthPercentage = report.total > 0
-    ? Math.round((report.healthy / report.total) * 100)
-    : 100;
+  const healthPercentage = report.total > 0 ? Math.round((report.healthy / report.total) * 100) : 100;
 
   return (
     <Card className={className}>
@@ -117,9 +92,9 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
               停止
             </Button>
           ) : (
-            <Button size="sm" variant="outline" onClick={handleCheckAll}>
+            <Button size="sm" variant="outline" onClick={handleCheckAll} disabled={bookmarks.length === 0}>
               <RefreshCw className="h-4 w-4 mr-1" />
-              检查全部
+              检查全部（{bookmarks.length}）
             </Button>
           )}
         </div>
@@ -129,7 +104,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
         {isChecking && progress && (
           <div className="mb-4 space-y-2">
             <div className="flex justify-between text-sm">
-              <span>检查中...</span>
+              <span className="truncate">{progress.current}</span>
               <span>
                 {progress.completed} / {progress.total}
               </span>
@@ -137,19 +112,16 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
             <div className="h-2 bg-muted rounded-full overflow-hidden">
               <div
                 className="h-full bg-primary transition-all duration-300"
-                style={{
-                  width: `${(progress.completed / progress.total) * 100}%`,
-                }}
+                style={{ width: `${(progress.completed / Math.max(progress.total, 1)) * 100}%` }}
               />
             </div>
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>
                 ✓ {progress.success} / ✗ {progress.failed}
+                {progress.skipped > 0 ? ` / 跳过 ${progress.skipped}` : ''}
               </span>
               {progress.estimatedRemaining && (
-                <span>
-                  剩余 ~{Math.ceil(progress.estimatedRemaining / 1000)}s
-                </span>
+                <span>剩余 ~{Math.ceil(progress.estimatedRemaining / 1000)}s</span>
               )}
             </div>
           </div>
@@ -191,8 +163,8 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
                   healthPercentage >= 80
                     ? 'text-green-600'
                     : healthPercentage >= 50
-                    ? 'text-yellow-600'
-                    : 'text-red-600'
+                      ? 'text-yellow-600'
+                      : 'text-red-600'
                 )}
               >
                 {healthPercentage}%
@@ -205,33 +177,23 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
             </div>
           </div>
 
-          {/* 平均响应时间 */}
           {report.avgResponseTime > 0 && (
             <div className="flex items-center justify-between mt-2">
               <span className="text-sm text-muted-foreground">平均响应</span>
-              <span className="text-sm font-medium">
-                {report.avgResponseTime}ms
-              </span>
+              <span className="text-sm font-medium">{Math.round(report.avgResponseTime)}ms</span>
             </div>
           )}
 
-          {/* 最后检查时间 */}
           {report.lastCheckedAt > 0 && (
             <div className="flex items-center justify-between mt-2">
               <span className="text-sm text-muted-foreground">最后检查</span>
-              <span className="text-sm">
-                {formatLastChecked(report.lastCheckedAt)}
-              </span>
+              <span className="text-sm">{formatLastChecked(report.lastCheckedAt)}</span>
             </div>
           )}
         </div>
 
         {/* 扫描设置面板 */}
-        <ScanSettingsPanel
-          settings={scanSettings}
-          onChange={handleSettingsChange}
-          disabled={isChecking}
-        />
+        <ScanSettingsPanel settings={scanSettings} onChange={handleSettingsChange} disabled={isChecking} />
       </CardContent>
     </Card>
   );
@@ -267,8 +229,7 @@ function StatCard({
 
 // 格式化最后检查时间
 function formatLastChecked(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
+  const diff = Date.now() - timestamp;
 
   if (diff < 60000) return '刚刚';
   if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;

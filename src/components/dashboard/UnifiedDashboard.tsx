@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   RefreshCw,
   Wand2,
-  Settings,
   TrendingUp,
   Folder,
   Tag,
@@ -32,7 +31,6 @@ export function UnifiedDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastOrganize, setLastOrganize] = useState<any>(null);
   const [expandedSections, setExpandedSections] = useState({
     categories: true,
     domains: false,
@@ -48,13 +46,8 @@ export function UnifiedDashboard() {
       }
       setError(null);
 
-      const [profileData, stored] = await Promise.all([
-        profileService.getProfile(forceRefresh),
-        chrome.storage.local.get(['lastOrganizeResult', 'lastOrganizeTime']),
-      ]);
-
+      const profileData = await profileService.getProfile(forceRefresh);
       setProfile(profileData);
-      setLastOrganize(stored);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -68,30 +61,6 @@ export function UnifiedDashboard() {
   }, [loadData]);
 
   const handleRefresh = () => loadData(true);
-
-  const handleQuickOrganize = async () => {
-    try {
-      const { organizerService } = await import('@/services');
-      const result = await organizerService.organizeAll({
-        strategy: 'auto',
-        createNewFolders: true,
-        applyTags: true,
-        moveBookmarks: true,
-        removeDuplicates: false,
-        minConfidence: 0.3,
-      });
-
-      await chrome.storage.local.set({
-        lastOrganizeResult: result,
-        lastOrganizeTime: Date.now(),
-      });
-
-      await loadData(true);
-      alert(`整理完成！\n已处理: ${result.processed}\n已分类: ${result.classified}`);
-    } catch (error) {
-      alert(`整理失败: ${(error as Error).message}`);
-    }
-  };
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -212,20 +181,13 @@ export function UnifiedDashboard() {
         React.createElement(CardTitle, { className: 'text-base' }, '快速操作')
       ),
       React.createElement(CardContent, null,
-        React.createElement('div', { className: 'grid grid-cols-3 gap-3' },
-          React.createElement(Button, {
-            onClick: handleQuickOrganize,
-            className: 'bg-purple-600 hover:bg-purple-700',
-          },
-            React.createElement(Wand2, { size: 16 }),
-            '整理书签'
-          ),
+        React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
           React.createElement(Button, {
             variant: 'outline',
             onClick: () => { window.location.hash = 'organizer'; },
           },
-            React.createElement(Settings, { size: 16 }),
-            '高级整理'
+            React.createElement(Wand2, { size: 16 }),
+            '智能整理'
           ),
           React.createElement(Button, {
             variant: 'outline',
@@ -316,24 +278,6 @@ export function UnifiedDashboard() {
       )
     ),
 
-    // 上次整理结果
-    lastOrganize?.lastOrganizeResult && React.createElement(Card, { className: 'bg-green-50 border-green-200' },
-      React.createElement(CardHeader, { className: 'pb-2' },
-        React.createElement(CardTitle, { className: 'text-base text-green-900' }, '上次整理结果')
-      ),
-      React.createElement(CardContent, null,
-        React.createElement('div', { className: 'grid grid-cols-4 gap-4 mb-2' },
-          React.createElement(MiniStat, { label: '已处理', value: lastOrganize.lastOrganizeResult.processed }),
-          React.createElement(MiniStat, { label: '已分类', value: lastOrganize.lastOrganizeResult.classified }),
-          React.createElement(MiniStat, { label: '已加标签', value: lastOrganize.lastOrganizeResult.tagged }),
-          React.createElement(MiniStat, { label: '已移动', value: lastOrganize.lastOrganizeResult.moved })
-        ),
-        lastOrganize.lastOrganizeTime && React.createElement('div', { className: 'text-xs text-gray-600' },
-          `整理时间: ${new Date(lastOrganize.lastOrganizeTime).toLocaleString()}`
-        )
-      )
-    ),
-
     // 生成时间
     profile && React.createElement('div', { className: 'text-xs text-gray-400 text-right' },
       `数据更新于 ${new Date(profile.generatedAt).toLocaleString()}`
@@ -363,14 +307,6 @@ function StatCard({ icon: Icon, label, value, color, subValue }: {
     ),
     React.createElement('div', { className: 'text-2xl font-bold tabular-nums', style: { color } }, value),
     subValue && React.createElement('div', { className: 'text-xs text-gray-400 mt-1' }, subValue)
-  );
-}
-
-// 迷你统计
-function MiniStat({ label, value }: { label: string; value: number }) {
-  return React.createElement('div', null,
-    React.createElement('div', { className: 'text-xl font-bold text-green-700' }, value),
-    React.createElement('div', { className: 'text-xs text-gray-600' }, label)
   );
 }
 
