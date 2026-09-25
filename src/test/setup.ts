@@ -31,6 +31,10 @@ global.chrome = {
       addListener: vi.fn(),
       removeListener: vi.fn(),
     },
+    onChildrenReordered: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
   },
   storage: {
     local: {

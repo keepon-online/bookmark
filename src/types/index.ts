@@ -1,6 +1,7 @@
 // 类型导出
 
 export * from './bookmark';
+export * from './browserBookmarks';
 export * from './folder';
 export * from './tag';
 export * from './messages';

@@ -1,5 +1,6 @@
 // 服务导出
 
+export * from './browserBookmarksService';
 export * from './bookmarkService';
 export * from './folderService';
 export * from './tagService';
