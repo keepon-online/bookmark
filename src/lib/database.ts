@@ -1,6 +1,7 @@
 // IndexedDB 数据库定义 (Dexie.js)
 
 import Dexie, { type Table } from 'dexie';
+import { getUrlKey } from './utils';
 import type { Bookmark, Folder, Tag } from '@/types';
 import type { OrganizeHistory } from '@/types/organizer';
 import type { StatsCache } from '@/types/stats';
@@ -140,6 +141,20 @@ export class BookmarkDatabase extends Dexie {
     this.version(6).stores({
       bookmarkTags: null,
     });
+
+    // 版本 7：添加 urlKey 去重索引，存量数据在升级时回填
+    this.version(7)
+      .stores({
+        bookmarks:
+          'id, url, urlKey, title, folderId, createdAt, isFavorite, status, isArchived, aiGenerated, [folderId+createdAt]',
+      })
+      .upgrade(async (tx) => {
+        await tx.table('bookmarks').toCollection().modify((bookmark: Bookmark) => {
+          if (!bookmark.urlKey) {
+            bookmark.urlKey = getUrlKey(bookmark.url);
+          }
+        });
+      });
   }
 }
 

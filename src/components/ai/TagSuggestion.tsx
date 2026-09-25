@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Sparkles, Plus, Check } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { cn } from '@/lib/utils';
+import { cn, getUrlKey } from '@/lib/utils';
 import { aiService } from '@/services/aiService';
 import type { Bookmark, ClassificationResult } from '@/types';
 
@@ -39,6 +39,7 @@ export function TagSuggestion({
         const result = await aiService.classifyBookmark({
           id: 'tag-suggestion-preview',
           url,
+          urlKey: getUrlKey(url),
           title,
           description,
           tags: [],

@@ -1,7 +1,7 @@
 // 书签服务
 
 import { db } from '@/lib/database';
-import { generateId, now, normalizeUrl, isValidUrl, getFaviconUrl } from '@/lib/utils';
+import { generateId, now, normalizeUrl, isValidUrl, getFaviconUrl, getUrlKey } from '@/lib/utils';
 import { aiService } from './aiService';
 import { folderService } from './folderService';
 import type {
@@ -13,13 +13,6 @@ import type {
 } from '@/types';
 
 export class BookmarkService {
-  private getUrlKey(url: string): string {
-    return normalizeUrl(url)
-      .toLowerCase()
-      .replace(/^https?:\/\//, '')
-      .replace(/^www\./, '');
-  }
-
   // 创建书签
   async create(dto: CreateBookmarkDTO, autoClassify = true): Promise<Bookmark> {
     if (!isValidUrl(dto.url)) {
@@ -28,11 +21,9 @@ export class BookmarkService {
 
     const normalizedUrl = normalizeUrl(dto.url);
 
-    // 检查是否重复
-    const urlKey = this.getUrlKey(normalizedUrl);
-    const existing = (await db.bookmarks.toArray()).find(
-      (bookmark) => this.getUrlKey(bookmark.url) === urlKey
-    );
+    // 检查是否重复（urlKey 有索引，避免全表扫描）
+    const urlKey = getUrlKey(normalizedUrl);
+    const existing = await db.bookmarks.where('urlKey').equals(urlKey).first();
     if (existing) {
       throw new Error('Bookmark already exists');
     }
@@ -40,6 +31,7 @@ export class BookmarkService {
     const bookmark: Bookmark = {
       id: generateId(),
       url: normalizedUrl,
+      urlKey,
       title: dto.title || normalizedUrl,
       description: dto.description,
       folderId: dto.folderId,
@@ -120,17 +112,19 @@ export class BookmarkService {
         throw new Error('Invalid URL');
       }
       const normalizedUrl = normalizeUrl(dto.url);
-      const urlKey = this.getUrlKey(normalizedUrl);
-      const duplicate = (await db.bookmarks.toArray()).find(
-        (existingBookmark) =>
-          existingBookmark.id !== id && this.getUrlKey(existingBookmark.url) === urlKey
-      );
+      const urlKey = getUrlKey(normalizedUrl);
+      const duplicate = await db.bookmarks
+        .where('urlKey')
+        .equals(urlKey)
+        .filter((existingBookmark) => existingBookmark.id !== id)
+        .first();
 
       if (duplicate) {
         throw new Error('Bookmark already exists');
       }
 
       updates.url = normalizedUrl;
+      updates.urlKey = urlKey;
     }
 
     await db.bookmarks.update(id, updates);
@@ -391,7 +385,7 @@ export class BookmarkService {
     const urlMap = new Map<string, Bookmark[]>();
 
     for (const bookmark of bookmarks) {
-      const normalized = this.getUrlKey(bookmark.url);
+      const normalized = bookmark.urlKey ?? getUrlKey(bookmark.url);
       const existing = urlMap.get(normalized) || [];
       existing.push(bookmark);
       urlMap.set(normalized, existing);
@@ -492,10 +486,12 @@ export class BookmarkService {
       return parentId;
     }
 
-    const existingFolders = await db.folders.toArray();
-    const existing = existingFolders.find(
-      (folder) => folder.name === node.title && folder.parentId === parentId
-    );
+    // name 有索引，先按名称缩小范围再比对父级，避免导入时反复全表扫描
+    const existing = await db.folders
+      .where('name')
+      .equals(node.title)
+      .filter((folder) => folder.parentId === parentId)
+      .first();
 
     if (existing) {
       return existing.id;
@@ -537,9 +533,12 @@ export class BookmarkService {
       let parentId: string | undefined = undefined;
 
       for (const part of parts) {
-        // 查找现有文件夹
-        const allFolders = await db.folders.toArray();
-        const existing = allFolders.find(f => f.name === part && f.parentId === parentId);
+        // 查找现有文件夹（name 有索引，避免每次分类都全表扫描）
+        const existing = await db.folders
+          .where('name')
+          .equals(part)
+          .filter((f) => f.parentId === parentId)
+          .first();
 
         if (existing) {
           parentId = existing.id;

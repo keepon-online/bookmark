@@ -9,6 +9,7 @@ import type {
   UserSession,
 } from '@/types';
 import { db } from '@/lib/database';
+import { getUrlKey } from '@/lib/utils';
 import { bookmarkService } from '@/services';
 import type { Bookmark } from '@/types';
 
@@ -249,6 +250,7 @@ export class SyncService {
     return {
       id: data.id,
       url: data.url,
+      urlKey: getUrlKey(data.url),
       title: data.title,
       description: data.description,
       folderId: data.folderId,

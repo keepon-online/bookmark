@@ -15,6 +15,8 @@ export interface BookmarkMeta {
 export interface Bookmark {
   id: string;
   url: string;
+  /** URL 去重键（去除协议/www 前缀的小写标准化形式），用于索引查重 */
+  urlKey: string;
   title: string;
   description?: string;
   folderId?: string;

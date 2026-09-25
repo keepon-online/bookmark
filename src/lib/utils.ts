@@ -156,6 +156,15 @@ export function normalizeUrl(url: string): string {
   }
 }
 
+// 计算 URL 去重键：标准化后去除协议与 www 前缀并小写
+// 写入 bookmarks.urlKey 索引，用于 O(log n) 查重
+export function getUrlKey(url: string): string {
+  return normalizeUrl(url)
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '');
+}
+
 // 提取关键词（简单实现）
 export function extractKeywords(text: string): string[] {
   // 移除标点符号

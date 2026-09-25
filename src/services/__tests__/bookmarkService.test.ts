@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
+import Dexie from 'dexie';
 import { db } from '@/lib/database';
 import { bookmarkService } from '@/services/bookmarkService';
 
@@ -109,6 +110,102 @@ describe('bookmarkService', () => {
       'duplicate-older',
     ]);
     expect(groups[0].reason).toContain('最近访问于');
+  });
+
+  it('stores the urlKey used for duplicate detection', async () => {
+    const created = await bookmarkService.create(
+      {
+        url: 'https://www.example.com/page/',
+        title: 'Page',
+      },
+      false
+    );
+
+    expect(created.urlKey).toBe('example.com/page');
+
+    const row = await db.bookmarks.get(created.id);
+    expect(row?.urlKey).toBe('example.com/page');
+  });
+
+  it('keeps urlKey in sync when the URL is updated', async () => {
+    const created = await bookmarkService.create(
+      {
+        url: 'https://example.com/x',
+        title: 'X',
+      },
+      false
+    );
+
+    await bookmarkService.update(created.id, { url: 'https://www.example.com/y/' });
+
+    const row = await db.bookmarks.get(created.id);
+    expect(row?.url).toBe('https://www.example.com/y');
+    expect(row?.urlKey).toBe('example.com/y');
+
+    // 旧 URL 换协议/www 变体后可以重新创建，说明 urlKey 已跟随更新
+    const recreated = await bookmarkService.create(
+      {
+        url: 'http://example.com/x',
+        title: 'X again',
+      },
+      false
+    );
+    expect(recreated.urlKey).toBe('example.com/x');
+  });
+
+  it('backfills urlKey when upgrading a legacy database to v7', async () => {
+    await db.close();
+    await db.delete();
+
+    // 用 v5 的 schema 构造一个不含 urlKey 的存量数据库
+    const legacy = new Dexie('SmartBookmarkDB');
+    legacy.version(5).stores({
+      bookmarks: 'id, url, title, folderId, createdAt, isFavorite, status, isArchived, aiGenerated, [folderId+createdAt]',
+      folders: 'id, name, parentId, order, browserFolderId, syncStatus, [parentId+order]',
+      tags: 'id, &name, usageCount',
+      bookmarkTags: '[bookmarkId+tagId], bookmarkId, tagId',
+      linkChecks: 'id, bookmarkId, checkedAt',
+      syncMeta: 'id, [entityType+entityId], syncStatus',
+      organizeHistory: 'id, timestamp',
+      statsCache: 'id, type, createdAt, expiresAt',
+      bookmarkGroups: 'id, name, createdAt',
+      duplicateRecords: 'id, url, detectedAt, resolved',
+      embeddings: 'id, bookmarkId, model, createdAt',
+      folderMappings: 'id, dbFolderId, browserFolderId, syncStatus',
+      folderSyncConflicts: 'id, type, dbFolderId, browserFolderId, resolved, detectedAt',
+    });
+    await legacy.open();
+    await legacy.table('bookmarks').add({
+      id: 'legacy-bookmark',
+      url: 'https://www.example.com/legacy/',
+      title: 'Legacy',
+      tags: [],
+      createdAt: 1,
+      updatedAt: 1,
+      visitCount: 0,
+      isFavorite: false,
+      isArchived: false,
+      status: 'active',
+      aiGenerated: false,
+    });
+    legacy.close();
+
+    // 用当前 schema 打开，触发 v6（删表）+ v7（加索引并回填）迁移
+    await db.open();
+
+    const row = await db.bookmarks.get('legacy-bookmark');
+    expect(row?.urlKey).toBe('example.com/legacy');
+
+    // 回填后，变体 URL 能被查重拦截
+    await expect(
+      bookmarkService.create(
+        {
+          url: 'http://example.com/legacy',
+          title: 'Should fail',
+        },
+        false
+      )
+    ).rejects.toThrow('Bookmark already exists');
   });
 
   it('imports browser bookmarks with folder hierarchy preserved', async () => {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { db } from '@/lib/database';
+import { getUrlKey } from '@/lib/utils';
 import { folderService } from '@/services/folderService';
 import { semanticSearchService } from '@/services/semanticSearchService';
 import { SyncService } from '@/services/syncService';
@@ -42,6 +43,7 @@ describe('regressions', () => {
     await db.bookmarks.add({
       id: 'bookmark-1',
       url: 'https://example.com',
+      urlKey: getUrlKey('https://example.com'),
       title: 'Example',
       folderId: 'folder-with-bookmark',
       tags: [],
@@ -76,6 +78,7 @@ describe('regressions', () => {
       {
         id: 'bookmark-1',
         url: 'https://example.com/docs',
+        urlKey: getUrlKey('https://example.com/docs'),
         title: 'Example Docs',
         folderId: undefined,
         tags: ['docs'],
@@ -272,6 +275,7 @@ describe('regressions', () => {
     await db.bookmarks.add({
       id: 'bookmark-health',
       url: 'https://broken.example.com',
+      urlKey: getUrlKey('https://broken.example.com'),
       title: 'Broken',
       tags: [],
       createdAt: Date.now(),

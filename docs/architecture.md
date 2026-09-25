@@ -161,6 +161,7 @@ syncService.download()
 {
   id: string;                  // 主键
   url: string;                 // 索引
+  urlKey: string;              // 索引 (v7) 去重键，查重 O(log n)
   title: string;               // 索引
   folderId: string;            // 索引
   createdAt: number;           // 索引
