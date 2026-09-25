@@ -2,7 +2,6 @@
 
 import { urlAnalyzer } from '@/lib/urlAnalyzer';
 import { extractKeywords } from '@/lib/utils';
-import { db } from '@/lib/database';
 import type {
   Bookmark,
   ClassificationResult,
@@ -430,18 +429,15 @@ export class AIService {
    * 从用户反馈中学习
    */
   async learnFromUserCorrections(
-    bookmarkId: string,
+    input: { url: string; originalTags?: string[] },
     userTags: string[],
     userFolder?: string
   ): Promise<void> {
-    const bookmark = await db.bookmarks.get(bookmarkId);
-    if (!bookmark) return;
-
     const learningData: LearningData = {
-      bookmarkId,
-      url: bookmark.url,
-      originalTags: bookmark.tags,
-      originalFolder: bookmark.folderId,
+      bookmarkId: '',
+      url: input.url,
+      originalTags: input.originalTags ?? [],
+      originalFolder: userFolder,
       userTags,
       userFolder,
       timestamp: Date.now(),

@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
-import { db } from '@/lib/database';
 import { auxDb } from '@/lib/auxDatabase';
-import { getUrlKey } from '@/lib/utils';
-import { folderService } from '@/services/folderService';
 import { httpChecker } from '@/lib/httpChecker';
 import { linkHealthService } from '@/services/linkHealthService';
 
@@ -11,59 +8,8 @@ describe('regressions', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     localStorage.clear();
-    await db.delete();
-    await db.open();
     await auxDb.delete();
     await auxDb.open();
-  });
-
-  it('findEmptyFolders only returns folders without bookmarks', async () => {
-    await db.folders.bulkAdd([
-      {
-        id: 'folder-empty',
-        name: 'Empty',
-        icon: '📁',
-        parentId: 'root',
-        order: 0,
-        isSmartFolder: false,
-        createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000,
-        updatedAt: Date.now(),
-      },
-      {
-        id: 'folder-with-bookmark',
-        name: 'Has Bookmark',
-        icon: '📁',
-        parentId: 'root',
-        order: 1,
-        isSmartFolder: false,
-        createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000,
-        updatedAt: Date.now(),
-      },
-    ]);
-
-    await db.bookmarks.add({
-      id: 'bookmark-1',
-      url: 'https://example.com',
-      urlKey: getUrlKey('https://example.com'),
-      title: 'Example',
-      folderId: 'folder-with-bookmark',
-      tags: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      visitCount: 0,
-      isFavorite: false,
-      isArchived: false,
-      status: 'active',
-      aiGenerated: false,
-    });
-
-    const emptyFolders = await folderService.findEmptyFolders({
-      excludeRoot: true,
-      minAge: 0,
-    });
-
-    expect(emptyFolders.map((info) => info.folder.id)).toEqual(['folder-empty']);
-    expect(emptyFolders.every((info) => info.isEmpty)).toBe(true);
   });
 
   it('opaque fetch responses are not treated as healthy links', async () => {

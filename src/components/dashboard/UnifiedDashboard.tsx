@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { CircularProgress } from '@/components/ui/CircularProgress';
 import { cn } from '@/lib/utils';
 import { profileService } from '@/services/profileService';
+import { useBrowserBookmarkStore } from '@/stores';
 import type { BookmarkProfile } from '@/types/profile';
 import { COLLECTOR_LEVELS, CATEGORY_CONFIGS } from '@/types/profile';
 
@@ -37,16 +38,19 @@ export function UnifiedDashboard() {
     trends: false,
   });
 
-  const loadData = useCallback(async (forceRefresh = false) => {
+  const loadData = useCallback(async () => {
     try {
-      if (forceRefresh) {
-        setIsRefreshing(true);
-      } else {
-        setIsLoading(true);
-      }
+      setIsLoading(true);
       setError(null);
 
-      const profileData = await profileService.getProfile(forceRefresh);
+      // 确保浏览器书签快照就绪，然后纯计算档案
+      await useBrowserBookmarkStore.getState().init();
+      const store = useBrowserBookmarkStore.getState();
+      const profileData = profileService.getProfile({
+        bookmarks: store.bookmarks,
+        folders: store.folders,
+        meta: store.meta,
+      });
       setProfile(profileData);
     } catch (err) {
       setError((err as Error).message);
@@ -57,10 +61,17 @@ export function UnifiedDashboard() {
   }, []);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
-  const handleRefresh = () => loadData(true);
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    void useBrowserBookmarkStore
+      .getState()
+      .refresh()
+      .then(loadData)
+      .finally(() => setIsRefreshing(false));
+  };
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));

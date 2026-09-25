@@ -1,17 +1,21 @@
 # 智能书签
 
-AI 驱动的智能书签管理浏览器扩展
+浏览器书签增强扩展（v0.6）
+
+**chrome.bookmarks 是唯一数据源**——书签直接保存在浏览器中，由 Chrome
+账号跨设备同步；扩展在其上叠加增强能力，随时可卸载、零数据迁移负担。
 
 ## 功能特性
 
-- 🧠 **智能分类** - AI 自动推荐分类和标签
-- 🔍 **快速搜索** - 模糊搜索，秒级定位书签
-- 📁 **文件夹管理** - 层级文件夹组织书签
-- 🏷️ **标签系统** - 灵活的多标签管理
-- ❤️ **收藏夹** - 快速访问常用书签
-- 📱 **侧边栏** - Chrome Sidepanel 支持
-- 🌙 **深色模式** - 跟随系统或手动切换
-- 📥 **浏览器导入** - 一键导入浏览器书签
+- 📁 **原生书签管理** — 直接读写浏览器书签树，文件夹树浏览、增删改移
+- 🔍 **秒级搜索** — 标题/URL/标签/路径模糊搜索，内存快照零等待
+- 🏷️ **标签与收藏** — 浏览器书签没有的字段存扩展元数据，支持 JSON 备份
+- 🧠 **AI 智能整理** — 手动触发，生成建议 → 预览确认 → 执行（本地规则
+  引擎免配置，可选接入 DeepSeek）
+- 🧹 **书签清理** — 重复检测（URL 规范化分组）、空文件夹清理
+- ❤️ **链接健康** — 批量死链检查，可停止、可跳过近期已检查项
+- 📊 **书签档案** — 域名分布、分类画像、组织度评分、收藏家等级
+- 📱 **侧边栏** — Chrome Sidepanel 常驻，快捷键 Alt+Shift+S
 
 ## 技术栈
 
@@ -19,54 +23,33 @@ AI 驱动的智能书签管理浏览器扩展
 - **前端**: React 18 + TypeScript
 - **状态管理**: Zustand
 - **UI**: Tailwind CSS + Radix UI
-- **存储**: IndexedDB (Dexie.js)
+- **数据**: chrome.bookmarks（唯一数据源）+ IndexedDB/Dexie（增强元数据）
 - **搜索**: Fuse.js
 
 ## 开发
 
-### 安装依赖
-
 ```bash
-pnpm install
-```
-
-### 开发模式
-
-```bash
-pnpm dev
-```
-
-### 构建
-
-```bash
-pnpm build
-```
-
-### 打包
-
-```bash
-pnpm zip
+pnpm install     # 安装依赖
+pnpm dev         # 开发模式
+pnpm test        # 单元测试
+pnpm build       # 构建
+pnpm zip         # 打包
 ```
 
 ## 项目结构
 
 ```
 src/
-├── background/     # Service Worker
-├── popup/          # 弹出窗口
-├── sidepanel/      # 侧边栏
-├── options/        # 设置页面
-├── components/     # React 组件
-│   ├── ui/         # 基础 UI 组件
-│   ├── bookmark/   # 书签组件
-│   ├── folder/     # 文件夹组件
-│   └── search/     # 搜索组件
-├── hooks/          # 自定义 Hooks
-├── stores/         # Zustand 状态
-├── services/       # 业务服务
-├── lib/            # 工具库
-├── types/          # TypeScript 类型
-└── styles/         # 样式文件
+├── entrypoints/
+│   ├── background/   # Service Worker（快捷键/右键菜单/事件清扫）
+│   ├── popup/        # 快速操作弹窗
+│   ├── sidepanel/    # 主界面侧边栏
+│   └── options/      # 设置页
+├── components/       # React 组件
+├── stores/           # browserBookmarkStore + uiStore
+├── services/         # browserBookmarks/organizer/linkHealth/profile/ai
+├── lib/              # auxDatabase/messaging/httpChecker/utils
+└── types/            # TypeScript 类型
 ```
 
 ## 许可证
