@@ -11,13 +11,13 @@ import type { BatchCheckOptions, CheckProgress, LinkCheckResult, LinkHealthRepor
 
 const DEFAULT_CONCURRENCY = 5;
 
-// 状态码 → 链接状态。401/403/405/429 视为"可达但拒绝机器访问"，
-// 不能判为死链（如 Cloudflare 拦截的站点实际是活的）。
+// 状态码 → 链接状态。401/403/405/408/429 视为"可达但拒绝/受限"，
+// 不能判为死链（如 Cloudflare 拦截、服务器超时抱怨——能回应就说明活着）。
 function classifyLinkStatus(status: number): 'active' | 'broken' {
   if (status >= 200 && status < 400) {
     return 'active';
   }
-  if ([401, 403, 405, 429].includes(status)) {
+  if ([401, 403, 405, 408, 429].includes(status)) {
     return 'active';
   }
   return 'broken';
