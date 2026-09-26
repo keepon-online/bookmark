@@ -65,6 +65,10 @@ global.chrome = {
       removeListener: vi.fn(),
     },
   },
+  permissions: {
+    contains: vi.fn(() => Promise.resolve(false)),
+    request: vi.fn(() => Promise.resolve(true)),
+  },
 } as any;
 
 // Mock IndexedDB

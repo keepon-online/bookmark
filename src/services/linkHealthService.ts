@@ -11,6 +11,18 @@ import type { BatchCheckOptions, CheckProgress, LinkCheckResult, LinkHealthRepor
 
 const DEFAULT_CONCURRENCY = 5;
 
+// 状态码 → 链接状态。401/403/405/429 视为"可达但拒绝机器访问"，
+// 不能判为死链（如 Cloudflare 拦截的站点实际是活的）。
+function classifyLinkStatus(status: number): 'active' | 'broken' {
+  if (status >= 200 && status < 400) {
+    return 'active';
+  }
+  if ([401, 403, 405, 429].includes(status)) {
+    return 'active';
+  }
+  return 'broken';
+}
+
 export class LinkHealthService {
   private stopRequested = false;
   private running = false;
@@ -81,12 +93,16 @@ export class LinkHealthService {
           };
           await auxDb.linkChecks.add(record);
 
-          const base = item.meta ?? defaultMeta(item.node.id);
-          await auxDb.bookmarkMeta.put({
-            ...base,
-            linkStatus: check.isAccessible ? 'active' : 'broken',
-            linkCheckedAt: check.checkedAt,
-          });
+          // 网络层失败（CORS/断网/超时，未获得 HTTP 响应）不判定失效：
+          // 保持原状态，下次检查可重试，避免把健康链接误标为死链
+          if (!check.networkError) {
+            const base = item.meta ?? defaultMeta(item.node.id);
+            await auxDb.bookmarkMeta.put({
+              ...base,
+              linkStatus: classifyLinkStatus(check.status),
+              linkCheckedAt: check.checkedAt,
+            });
+          }
 
           results.push({
             bookmarkId: item.node.id,

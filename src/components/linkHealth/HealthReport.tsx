@@ -1,7 +1,16 @@
 // 健康报告组件（v0.6：检查浏览器书签，结果写 aux）
 
 import * as React from 'react';
-import { Activity, CheckCircle, XCircle, Clock, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import {
+  Activity,
+  CheckCircle,
+  XCircle,
+  Clock,
+  RefreshCw,
+  TrendingUp,
+  TrendingDown,
+  ShieldAlert,
+} from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
@@ -17,6 +26,25 @@ import {
   type ScanSettings,
 } from './ScanSettingsPanel';
 
+const HOST_ORIGINS = ['http://*/*', 'https://*/*'];
+
+// 申请网站访问权限（需在用户手势中调用，如按钮点击）。
+// 未授权时 fetch 受 CORS 限制，大多数站点将无法检测。
+async function ensureHostPermissions(): Promise<boolean> {
+  if (typeof chrome === 'undefined' || !chrome.permissions) {
+    return true; // 测试环境
+  }
+  try {
+    const already = await chrome.permissions.contains({ origins: HOST_ORIGINS });
+    if (already) {
+      return true;
+    }
+    return await chrome.permissions.request({ origins: HOST_ORIGINS });
+  } catch {
+    return false;
+  }
+}
+
 interface HealthReportProps {
   onCheckAll?: () => void;
   className?: string;
@@ -30,6 +58,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   const [isChecking, setIsChecking] = React.useState(false);
   const [progress, setProgress] = React.useState<CheckProgress | null>(null);
   const [scanSettings, setScanSettings] = React.useState<ScanSettings>(DEFAULT_SCAN_SETTINGS);
+  const [permissionHint, setPermissionHint] = React.useState(false);
 
   // 加载报告和设置
   const loadReport = React.useCallback(async () => {
@@ -45,7 +74,11 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   // 执行全量检查
   const handleCheckAll = async () => {
     setIsChecking(true);
+    setPermissionHint(false);
     try {
+      const granted = await ensureHostPermissions();
+      setPermissionHint(!granted);
+
       const options = toBatchCheckOptions(scanSettings);
       await useBrowserBookmarkStore.getState().init();
       const nodes = useBrowserBookmarkStore.getState().bookmarks;
@@ -100,6 +133,17 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
         </div>
       </CardHeader>
       <CardContent>
+        {/* 权限提示 */}
+        {permissionHint && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-800 dark:text-amber-300">
+            <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>
+              未授予网站访问权限：受 CORS 限制，本次检查中无法访问的链接会保持"待检查"
+              （不会误判为失效）。重新点击"检查全部"并在浏览器弹窗中允许即可。
+            </span>
+          </div>
+        )}
+
         {/* 进度条 */}
         {isChecking && progress && (
           <div className="mb-4 space-y-2">

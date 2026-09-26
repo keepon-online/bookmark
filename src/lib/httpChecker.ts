@@ -30,6 +30,9 @@ export interface CheckResult {
   errorMessage?: string;
   // 检查时间
   checkedAt: number;
+  // 网络层失败（CORS/断网/超时等，未获得任何 HTTP 响应），
+  // 不能据此判断链接失效
+  networkError?: boolean;
 }
 
 const DEFAULT_OPTIONS: Required<CheckOptions> = {
@@ -40,17 +43,34 @@ const DEFAULT_OPTIONS: Required<CheckOptions> = {
   retryDelay: 1000,
 };
 
+// 合并选项：过滤掉显式传入的 undefined，避免覆盖默认值
+// （setTimeout(fn, undefined) 会立即触发 abort，retries: undefined 会跳过重试）
+function mergeOptions(options: CheckOptions): Required<CheckOptions> {
+  const defined = Object.fromEntries(
+    Object.entries(options).filter(([, value]) => value !== undefined)
+  ) as CheckOptions;
+  return { ...DEFAULT_OPTIONS, ...defined };
+}
+
 export class HttpChecker {
   /**
    * 检查单个 URL
    */
   async check(url: string, options: CheckOptions = {}): Promise<CheckResult> {
-    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const opts = mergeOptions(options);
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= opts.retries; attempt++) {
       try {
         const result = await this.performCheck(url, opts);
+        // 部分服务器不接受 HEAD（405/501），回退 GET 重试一次
+        if (
+          opts.method === 'HEAD' &&
+          !result.networkError &&
+          (result.status === 405 || result.status === 501)
+        ) {
+          return this.performCheck(url, { ...opts, method: 'GET' });
+        }
         return result;
       } catch (error) {
         lastError = error as Error;
@@ -72,6 +92,7 @@ export class HttpChecker {
       responseTime: 0,
       errorMessage: lastError?.message || 'Unknown error',
       checkedAt: Date.now(),
+      networkError: true,
     };
   }
 
@@ -136,6 +157,7 @@ export class HttpChecker {
           responseTime,
           errorMessage: 'Opaque response',
           checkedAt: Date.now(),
+          networkError: true,
         };
       }
 
@@ -173,6 +195,7 @@ export class HttpChecker {
         responseTime,
         errorMessage,
         checkedAt: Date.now(),
+        networkError: true,
       };
     }
   }
