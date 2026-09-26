@@ -3,9 +3,18 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   srcDir: 'src',
+  dev: {
+    server: {
+      // Windows + Node 17+ 下 localhost 可能只解析到 IPv6 ::1，导致
+      // dev server 只监听 [::1]:3000，而 Chrome 走 IPv4 连接被拒。
+      // 显式绑定 IPv4 并让扩展页面直连 127.0.0.1。
+      host: '127.0.0.1',
+      origin: 'http://127.0.0.1:3000',
+    },
+  },
   manifest: {
     name: '智能书签',
-    description: 'AI 驱动的智能书签管理插件 - 自动分类、标签推荐、跨设备同步、语义搜索、智能整理',
+    description: '浏览器书签增强插件 - 秒级搜索、智能整理、死链检查、书签档案',
     version: '0.6.0',
     permissions: [
       'bookmarks',
