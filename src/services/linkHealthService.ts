@@ -108,6 +108,7 @@ export class LinkHealthService {
               ...base,
               linkStatus: classifyLinkStatus(check.status),
               linkCheckedAt: check.checkedAt,
+              lastStatusCode: check.status,
             });
           }
 

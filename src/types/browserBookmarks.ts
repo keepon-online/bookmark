@@ -35,6 +35,8 @@ export interface AuxBookmarkMeta {
   lastVisited?: number;
   linkStatus?: 'active' | 'broken' | 'pending';
   linkCheckedAt?: number;
+  // 最近一次检查的 HTTP 状态码（0 = 网络层失败）
+  lastStatusCode?: number;
   aiGenerated?: boolean;
 }
 

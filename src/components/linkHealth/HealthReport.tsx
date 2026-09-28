@@ -25,6 +25,7 @@ import {
   DEFAULT_SCAN_SETTINGS,
   type ScanSettings,
 } from './ScanSettingsPanel';
+import { BrokenLinksPanel } from './BrokenLinksPanel';
 
 const HOST_ORIGINS = ['http://*/*', 'https://*/*'];
 
@@ -264,6 +265,9 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
 
         {/* 扫描设置面板 */}
         <ScanSettingsPanel settings={scanSettings} onChange={handleSettingsChange} disabled={isChecking} />
+
+        {/* 失效链接管理（有失效项时显示） */}
+        <BrokenLinksPanel scanSettings={scanSettings} />
       </CardContent>
     </Card>
   );
