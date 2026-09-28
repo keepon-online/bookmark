@@ -57,6 +57,8 @@ export interface BatchCheckOptions {
   skipRecentHours?: number;
   // 白名单域名（这些域名跳过检查）
   whitelist?: string[];
+  // 强制检查：忽略跳过窗口与人工标记（单条/所选重查用）
+  force?: boolean;
 }
 
 // 检查进度

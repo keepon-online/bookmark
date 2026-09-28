@@ -37,6 +37,8 @@ export interface AuxBookmarkMeta {
   linkCheckedAt?: number;
   // 最近一次检查的 HTTP 状态码（0 = 网络层失败）
   lastStatusCode?: number;
+  // 人工标记为正常：自动扫描不再改判（强制重查除外）
+  linkStatusManual?: boolean;
   aiGenerated?: boolean;
 }
 

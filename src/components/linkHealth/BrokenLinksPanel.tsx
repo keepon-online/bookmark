@@ -2,7 +2,7 @@
 // 列出被判失效的书签，支持单条/批量重新检查、打开、删除
 
 import * as React from 'react';
-import { AlertCircle, ExternalLink, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ExternalLink, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ScrollArea } from '@/components/ui/ScrollArea';
@@ -57,7 +57,7 @@ export function BrokenLinksPanel({ scanSettings, className }: BrokenLinksPanelPr
     );
   };
 
-  // 重新检查指定书签（忽略跳过窗口）
+  // 重新检查指定书签（强制：忽略跳过窗口与人工标记）
   const recheck = async (ids: string[]) => {
     if (ids.length === 0 || isWorking) return;
     setIsWorking(true);
@@ -67,11 +67,27 @@ export function BrokenLinksPanel({ scanSettings, className }: BrokenLinksPanelPr
       await linkHealthService.checkBookmarks(nodes, {
         ...toBatchCheckOptions(scanSettings),
         skipRecentHours: 0,
+        force: true,
       });
       await refresh();
       setSelected(new Set());
     } catch (error) {
       console.error('Recheck failed:', error);
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  // 人工标记为正常：后续自动扫描不再改判
+  const markHealthy = async (ids: string[]) => {
+    if (ids.length === 0 || isWorking) return;
+    setIsWorking(true);
+    try {
+      await linkHealthService.markAsHealthy(ids);
+      await refresh();
+      setSelected(new Set());
+    } catch (error) {
+      console.error('Mark healthy failed:', error);
     } finally {
       setIsWorking(false);
     }
@@ -122,6 +138,17 @@ export function BrokenLinksPanel({ scanSettings, className }: BrokenLinksPanelPr
               <RefreshCw className="h-3 w-3 mr-1" />
             )}
             重新检查{selected.size > 0 ? `所选（${selected.size}）` : '全部'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => void markHealthy(selected.size > 0 ? [...selected] : broken.map((n) => n.id))}
+            disabled={isWorking}
+            title="人工确认这些链接正常，后续自动扫描不再改判"
+          >
+            <CheckCircle2 className="h-3 w-3 mr-1" />
+            标记正常{selected.size > 0 ? `所选（${selected.size}）` : '全部'}
           </Button>
           <Button
             variant="destructive"
@@ -178,6 +205,16 @@ export function BrokenLinksPanel({ scanSettings, className }: BrokenLinksPanelPr
                     {record?.linkCheckedAt ? ` · 检查于 ${formatRelativeTime(record.linkCheckedAt)}` : ''}
                   </div>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 text-green-600 hover:text-green-700"
+                  title="人工标记为正常（后续自动扫描不再改判）"
+                  disabled={isWorking}
+                  onClick={() => void markHealthy([node.id])}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

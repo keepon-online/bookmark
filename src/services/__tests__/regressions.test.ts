@@ -97,6 +97,67 @@ describe('regressions', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('HEAD 疑似失效时 GET 复核：HEAD 404 但 GET 200 判为正常', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'GET') {
+        return { type: 'basic', ok: true, status: 200, url };
+      }
+      return { type: 'basic', ok: false, status: 404, url };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const node = {
+      id: 'bookmark-head-404',
+      parentId: '1',
+      title: 'HEAD rejected',
+      url: 'https://picky.example.com/page',
+      index: 0,
+      dateAdded: 100,
+      path: '书签栏',
+    };
+
+    const results = await linkHealthService.checkBookmarks([node], { retries: 0 });
+
+    // GET 复核拿到 200 → 不判失效
+    expect(results[0].status).toBe(200);
+    const meta = await auxDb.bookmarkMeta.get('bookmark-head-404');
+    expect(meta?.linkStatus).toBe('active');
+  });
+
+  it('人工标记正常后自动扫描跳过，强制重查仍会检查', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      type: 'basic', ok: false, status: 404, url: 'https://marked.example.com/x',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const node = {
+      id: 'bookmark-manual',
+      parentId: '1',
+      title: 'Manually OK',
+      url: 'https://marked.example.com/x',
+      index: 0,
+      dateAdded: 100,
+      path: '书签栏',
+    };
+
+    // 人工标记为正常
+    await linkHealthService.markAsHealthy([node.id]);
+    const marked = await auxDb.bookmarkMeta.get('bookmark-manual');
+    expect(marked?.linkStatus).toBe('active');
+    expect(marked?.linkStatusManual).toBe(true);
+
+    // 普通扫描跳过（不发请求）
+    fetchMock.mockClear();
+    await linkHealthService.checkBookmarks([node]);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // 强制重查仍会检查并按结果改判
+    await linkHealthService.checkBookmarks([node], { retries: 0, force: true });
+    expect(fetchMock).toHaveBeenCalled();
+    const after = await auxDb.bookmarkMeta.get('bookmark-manual');
+    expect(after?.linkStatus).toBe('broken');
+  });
+
   it('白名单域名跳过检查，resetCheckResults 清除状态但保留其他元数据', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       type: 'basic', ok: true, status: 200, url: 'https://github.com/x',
