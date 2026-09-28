@@ -2,12 +2,13 @@
 // v0.6：数据来自 chrome.bookmarks（唯一数据源），通过 browserBookmarkStore 访问
 
 import * as React from 'react';
-import { Plus, Settings, Bookmark, Heart, Clock, AlertTriangle, FolderOpen } from 'lucide-react';
+import { Plus, Settings, Bookmark, Heart, Clock, AlertTriangle, FolderOpen, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { SearchBar } from '@/components/search/SearchBar';
 import { BrowserBookmarkList } from '@/components/bookmark/BrowserBookmarkList';
 import { BrowserBookmarkForm } from '@/components/bookmark/BrowserBookmarkForm';
 import { useFilteredBookmarks } from '@/components/bookmark/useBookmarkFilter';
+import { useBookmarkEditor } from '@/components/bookmark/useBookmarkEditor';
 import { useBrowserBookmarkStore, initializeTheme } from '@/stores';
 import { cn } from '@/lib/utils';
 import '@/styles/globals.css';
@@ -20,7 +21,6 @@ export function App() {
   const isInitialized = useBrowserBookmarkStore((state) => state.isInitialized);
   const isLoading = useBrowserBookmarkStore((state) => state.isLoading);
   const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
-  const folders = useBrowserBookmarkStore((state) => state.folders);
   const meta = useBrowserBookmarkStore((state) => state.meta);
   const selectedIds = useBrowserBookmarkStore((state) => state.selectedIds);
 
@@ -33,6 +33,7 @@ export function App() {
 
   const filtered = useFilteredBookmarks();
   const searchQuery = useBrowserBookmarkStore((state) => state.searchQuery);
+  const editor = useBookmarkEditor();
 
   // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {
@@ -152,11 +153,7 @@ export function App() {
       <div className="flex-1 overflow-hidden px-2">
         {currentView === 'add' ? (
           <BrowserBookmarkForm
-            folders={folders.map((folder) => ({
-              id: folder.id,
-              title: folder.title,
-              path: folder.path,
-            }))}
+            folders={editor.folderOptions}
             onSubmit={handleAddBookmark}
             onCancel={() => setCurrentView('all')}
             className="p-2"
@@ -169,6 +166,7 @@ export function App() {
             selectedIds={selectedIds}
             onSelect={toggleSelect}
             onFavorite={toggleFavorite}
+            onEdit={editor.beginEdit}
             onDelete={(id) => void removeBookmarks([id])}
             onOpen={(id) => void recordVisit(id)}
             onTagClick={(tag) => {
@@ -196,6 +194,27 @@ export function App() {
           </Button>
         </div>
       </footer>
+
+      {/* 编辑书签对话框 */}
+      {editor.editingNode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-lg bg-background border shadow-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold">编辑书签</h2>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={editor.cancelEdit}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <BrowserBookmarkForm
+              initial={editor.editingNode}
+              initialTags={editor.editingTags}
+              folders={editor.folderOptions}
+              onSubmit={editor.submitEdit}
+              onCancel={editor.cancelEdit}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

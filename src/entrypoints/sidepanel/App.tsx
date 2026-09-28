@@ -23,6 +23,7 @@ import { SearchBar } from '@/components/search/SearchBar';
 import { BrowserBookmarkList } from '@/components/bookmark/BrowserBookmarkList';
 import { BrowserBookmarkForm } from '@/components/bookmark/BrowserBookmarkForm';
 import { useFilteredBookmarks } from '@/components/bookmark/useBookmarkFilter';
+import { useBookmarkEditor } from '@/components/bookmark/useBookmarkEditor';
 import { useBrowserBookmarkStore, selectAllTags, initializeTheme } from '@/stores';
 import { cn } from '@/lib/utils';
 import type { BrowserTreeNode } from '@/types';
@@ -31,13 +32,11 @@ import '@/styles/globals.css';
 type ViewType = 'all' | 'favorites' | 'recent' | 'broken' | 'folder' | 'tag';
 
 export function App() {
-  const [editingId, setEditingId] = React.useState<string | null>(null);
   const [isAddOpen, setIsAddOpen] = React.useState(false);
 
   const isInitialized = useBrowserBookmarkStore((state) => state.isInitialized);
   const isLoading = useBrowserBookmarkStore((state) => state.isLoading);
   const tree = useBrowserBookmarkStore((state) => state.tree);
-  const folders = useBrowserBookmarkStore((state) => state.folders);
   const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
   const meta = useBrowserBookmarkStore((state) => state.meta);
   const selectedIds = useBrowserBookmarkStore((state) => state.selectedIds);
@@ -53,13 +52,12 @@ export function App() {
   const clearSelection = useBrowserBookmarkStore((state) => state.clearSelection);
   const toggleFavorite = useBrowserBookmarkStore((state) => state.toggleFavorite);
   const removeBookmarks = useBrowserBookmarkStore((state) => state.removeBookmarks);
-  const updateBookmark = useBrowserBookmarkStore((state) => state.updateBookmark);
-  const moveBookmarks = useBrowserBookmarkStore((state) => state.moveBookmarks);
   const refresh = useBrowserBookmarkStore((state) => state.refresh);
+
+  const editor = useBookmarkEditor();
 
   const filtered = useFilteredBookmarks();
   const tags = React.useMemo(() => selectAllTags(meta).slice(0, 30), [meta]);
-  const editingNode = editingId ? bookmarks.find((b) => b.id === editingId) : null;
 
   // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {
@@ -82,31 +80,6 @@ export function App() {
 
   const handleTagSelect = (tag: string) => {
     setFilter('tag', tag);
-  };
-
-  // 编辑保存：标题/URL 走 chrome.bookmarks，文件夹走 move，标签走 aux
-  const handleEditSubmit = async (value: {
-    url: string;
-    title: string;
-    folderId?: string;
-    tags: string[];
-  }) => {
-    if (!editingNode) return;
-    const store = useBrowserBookmarkStore.getState();
-    await updateBookmark(editingNode.id, { title: value.title, url: value.url });
-    if (value.folderId && value.folderId !== editingNode.parentId) {
-      await moveBookmarks([editingNode.id], value.folderId);
-    }
-    const currentTags = meta[editingNode.id]?.tags ?? [];
-    if (JSON.stringify([...currentTags].sort()) !== JSON.stringify([...value.tags].sort())) {
-      await store.addTags([editingNode.id], value.tags);
-      for (const tag of currentTags) {
-        if (!value.tags.includes(tag)) {
-          await store.removeTag(editingNode.id, tag);
-        }
-      }
-    }
-    setEditingId(null);
   };
 
   // 添加书签（写 chrome.bookmarks，标签写 aux）
@@ -256,7 +229,7 @@ export function App() {
             selectedIds={selectedIds}
             onSelect={toggleSelect}
             onFavorite={toggleFavorite}
-            onEdit={setEditingId}
+            onEdit={editor.beginEdit}
             onDelete={(id) => void removeBookmarks([id])}
             onOpen={(id) => void useBrowserBookmarkStore.getState().recordVisit(id)}
             onTagClick={handleTagSelect}
@@ -289,18 +262,14 @@ export function App() {
       )}
 
       {/* 编辑书签对话框 */}
-      {editingNode && (
-        <Dialog title="编辑书签" onClose={() => setEditingId(null)}>
+      {editor.editingNode && (
+        <Dialog title="编辑书签" onClose={editor.cancelEdit}>
           <BrowserBookmarkForm
-            initial={editingNode}
-            initialTags={meta[editingNode.id]?.tags ?? []}
-            folders={folders.map((folder) => ({
-              id: folder.id,
-              title: folder.title,
-              path: folder.path,
-            }))}
-            onSubmit={handleEditSubmit}
-            onCancel={() => setEditingId(null)}
+            initial={editor.editingNode}
+            initialTags={editor.editingTags}
+            folders={editor.folderOptions}
+            onSubmit={editor.submitEdit}
+            onCancel={editor.cancelEdit}
           />
         </Dialog>
       )}
@@ -309,11 +278,7 @@ export function App() {
       {isAddOpen && (
         <Dialog title="添加书签" onClose={() => setIsAddOpen(false)}>
           <BrowserBookmarkForm
-            folders={folders.map((folder) => ({
-              id: folder.id,
-              title: folder.title,
-              path: folder.path,
-            }))}
+            folders={editor.folderOptions}
             onSubmit={handleAddSubmit}
             onCancel={() => setIsAddOpen(false)}
           />
