@@ -73,13 +73,28 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
 
   // 执行全量检查
   const handleCheckAll = async () => {
+    await runCheck(toBatchCheckOptions(scanSettings));
+  };
+
+  // 清除全部检查记录并全量重查（忽略跳过窗口）——用于纠正历史误判
+  const handleResetAndRecheck = async () => {
+    try {
+      await linkHealthService.resetCheckResults();
+      await useBrowserBookmarkStore.getState().refresh();
+    } catch (error) {
+      console.error('Reset check results failed:', error);
+      return;
+    }
+    await runCheck({ ...toBatchCheckOptions(scanSettings), skipRecentHours: 0 });
+  };
+
+  const runCheck = async (options: ReturnType<typeof toBatchCheckOptions>) => {
     setIsChecking(true);
     setPermissionHint(false);
     try {
       const granted = await ensureHostPermissions();
       setPermissionHint(!granted);
 
-      const options = toBatchCheckOptions(scanSettings);
       await useBrowserBookmarkStore.getState().init();
       const nodes = useBrowserBookmarkStore.getState().bookmarks;
       await linkHealthService.checkBookmarks(nodes, options, setProgress);
@@ -125,10 +140,21 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
               停止
             </Button>
           ) : (
-            <Button size="sm" variant="outline" onClick={handleCheckAll} disabled={bookmarks.length === 0}>
-              <RefreshCw className="h-4 w-4 mr-1" />
-              检查全部（{bookmarks.length}）
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleResetAndRecheck}
+                disabled={bookmarks.length === 0}
+                title="清除全部检查记录后重新检查所有链接（忽略跳过窗口，用于纠正历史误判数据）"
+              >
+                清除记录并重查
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleCheckAll} disabled={bookmarks.length === 0}>
+                <RefreshCw className="h-4 w-4 mr-1" />
+                检查全部（{bookmarks.length}）
+              </Button>
+            </div>
           )}
         </div>
       </CardHeader>

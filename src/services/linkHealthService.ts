@@ -5,7 +5,7 @@
 
 import { httpChecker } from '@/lib/httpChecker';
 import { auxDb, defaultMeta, type LinkCheckRecord } from '@/lib/auxDatabase';
-import { generateId, now } from '@/lib/utils';
+import { generateId, getDomain, now } from '@/lib/utils';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 import type { BatchCheckOptions, CheckProgress, LinkCheckResult, LinkHealthReport } from '@/types/linkHealth';
 
@@ -13,7 +13,7 @@ const DEFAULT_CONCURRENCY = 5;
 
 // 状态码 → 链接状态。401/403/405/408/429 视为"可达但拒绝/受限"，
 // 不能判为死链（如 Cloudflare 拦截、服务器超时抱怨——能回应就说明活着）。
-function classifyLinkStatus(status: number): 'active' | 'broken' {
+export function classifyLinkStatus(status: number): 'active' | 'broken' {
   if (status >= 200 && status < 400) {
     return 'active';
   }
@@ -50,6 +50,7 @@ export class LinkHealthService {
     try {
       const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
       const skipRecentMs = (options.skipRecentHours ?? 0) * 3600_000;
+      const whitelist = new Set((options.whitelist ?? []).map((domain) => domain.toLowerCase()));
 
       // 预取元数据以判断跳过项
       const metas = await auxDb.bookmarkMeta.bulkGet(nodes.map((node) => node.id));
@@ -57,6 +58,11 @@ export class LinkHealthService {
       let skipped = 0;
       nodes.forEach((node, index) => {
         if (!node.url) return;
+        // 白名单域名跳过检查
+        if (node.url && whitelist.has(getDomain(node.url).toLowerCase())) {
+          skipped++;
+          return;
+        }
         const meta = metas[index];
         if (skipRecentMs > 0 && meta?.linkCheckedAt && now() - meta.linkCheckedAt < skipRecentMs) {
           skipped++;
@@ -95,7 +101,8 @@ export class LinkHealthService {
 
           // 网络层失败（CORS/断网/超时，未获得 HTTP 响应）不判定失效：
           // 保持原状态，下次检查可重试，避免把健康链接误标为死链
-          if (!check.networkError) {
+          const gotResponse = !check.networkError;
+          if (gotResponse) {
             const base = item.meta ?? defaultMeta(item.node.id);
             await auxDb.bookmarkMeta.put({
               ...base,
@@ -115,7 +122,10 @@ export class LinkHealthService {
           });
 
           completed++;
-          if (check.isAccessible) {
+          // 进度计数与最终分类一致：网络层失败计入 skipped（未检测）
+          if (!gotResponse) {
+            skipped++;
+          } else if (classifyLinkStatus(check.status) === 'active') {
             success++;
           } else {
             failed++;
@@ -213,6 +223,27 @@ export class LinkHealthService {
   async getCheckHistory(bookmarkId: string, limit = 10): Promise<LinkCheckRecord[]> {
     const records = await auxDb.linkChecks.where('bookmarkId').equals(bookmarkId).toArray();
     return records.sort((a, b) => b.checkedAt - a.checkedAt).slice(0, limit);
+  }
+
+  // 清除全部检查结果（历史记录 + 元数据上的 linkStatus/linkCheckedAt），
+  // 用于纠正历史误判数据；标签/收藏/备注等其他元数据保留
+  async resetCheckResults(): Promise<void> {
+    if (this.running) {
+      throw new Error('A check is running');
+    }
+    await auxDb.linkChecks.clear();
+    const metas = await auxDb.bookmarkMeta.toArray();
+    await auxDb.bookmarkMeta.bulkPut(
+      metas.map((meta) => ({
+        bookmarkId: meta.bookmarkId,
+        tags: meta.tags,
+        notes: meta.notes,
+        isFavorite: meta.isFavorite,
+        visitCount: meta.visitCount,
+        lastVisited: meta.lastVisited,
+        aiGenerated: meta.aiGenerated,
+      }))
+    );
   }
 
   // 清理超过保留天数的检查记录

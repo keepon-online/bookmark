@@ -96,4 +96,56 @@ describe('regressions', () => {
     expect(result.isAccessible).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('白名单域名跳过检查，resetCheckResults 清除状态但保留其他元数据', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      type: 'basic', ok: true, status: 200, url: 'https://github.com/x',
+    }));
+
+    const whitelistNode = {
+      id: 'bookmark-whitelisted',
+      parentId: '1',
+      title: 'Skipped',
+      url: 'https://trusted.example.com/page',
+      index: 0, dateAdded: 100, path: '书签栏',
+    };
+    const normalNode = {
+      id: 'bookmark-normal',
+      parentId: '1',
+      title: 'Checked',
+      url: 'https://github.com/x',
+      index: 0, dateAdded: 100, path: '书签栏',
+    };
+
+    // 预置一条带标签 + 失效状态的元数据
+    await auxDb.bookmarkMeta.put({
+      bookmarkId: 'bookmark-whitelisted',
+      tags: ['重要'],
+      isFavorite: true,
+      visitCount: 2,
+      linkStatus: 'broken',
+      linkCheckedAt: Date.now(),
+    });
+
+    const progressRef: { skipped: number } = { skipped: -1 };
+    const results = await linkHealthService.checkBookmarks(
+      [whitelistNode, normalNode],
+      { whitelist: ['trusted.example.com'], retries: 0 },
+      (p) => { progressRef.skipped = p.skipped; }
+    );
+
+    // 白名单被跳过（不发请求、无结果），普通链接被检查
+    expect(results.map((r) => r.bookmarkId)).toEqual(['bookmark-normal']);
+    expect(progressRef.skipped).toBe(1);
+
+    // reset：linkStatus/linkCheckedAt 清除，标签/收藏/访问数保留
+    await linkHealthService.resetCheckResults();
+    const resetMeta = await auxDb.bookmarkMeta.get('bookmark-whitelisted');
+    expect(resetMeta?.linkStatus).toBeUndefined();
+    expect(resetMeta?.linkCheckedAt).toBeUndefined();
+    expect(resetMeta?.tags).toEqual(['重要']);
+    expect(resetMeta?.isFavorite).toBe(true);
+    expect(resetMeta?.visitCount).toBe(2);
+    expect(await auxDb.linkChecks.count()).toBe(0);
+  });
 });

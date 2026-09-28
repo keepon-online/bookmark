@@ -56,6 +56,7 @@ export function toBatchCheckOptions(settings: ScanSettings): BatchCheckOptions {
     concurrency: settings.concurrency,
     retries: settings.retries,
     skipRecentHours: settings.skipRecentHours,
+    whitelist: settings.whitelist,
   };
 }
 

@@ -55,6 +55,8 @@ export interface BatchCheckOptions {
   onlyNew?: boolean;
   // 是否跳过最近检查过的
   skipRecentHours?: number;
+  // 白名单域名（这些域名跳过检查）
+  whitelist?: string[];
 }
 
 // 检查进度
