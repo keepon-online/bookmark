@@ -148,6 +148,190 @@ const DEFAULT_RULES: ClassificationRule[] = [
       contentType: 'social',
     },
   },
+  {
+    id: 'mdn',
+    name: 'MDN Web Docs',
+    description: 'MDN Web 技术权威文档',
+    priority: 95,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'exact', value: 'developer.mozilla.org' },
+    ],
+    actions: {
+      tags: ['开发', '文档', 'MDN', 'Web'],
+      folder: '开发/文档',
+      contentType: 'documentation',
+    },
+  },
+  {
+    id: 'frontend-frameworks',
+    name: 'Frontend Frameworks',
+    description: '主流前端框架官方文档',
+    priority: 85,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'exact', value: 'react.dev' },
+      { type: 'domain', operator: 'exact', value: 'vuejs.org' },
+      { type: 'domain', operator: 'endsWith', value: '.vuejs.org' },
+      { type: 'domain', operator: 'exact', value: 'angular.io' },
+      { type: 'domain', operator: 'exact', value: 'angular.dev' },
+      { type: 'domain', operator: 'exact', value: 'svelte.dev' },
+      { type: 'domain', operator: 'exact', value: 'nextjs.org' },
+      { type: 'domain', operator: 'exact', value: 'nuxt.com' },
+    ],
+    actions: {
+      tags: ['开发', '前端', '框架'],
+      folder: '开发/前端',
+      contentType: 'documentation',
+    },
+  },
+  {
+    id: 'css-ui',
+    name: 'CSS & UI Libraries',
+    description: '前端 UI 库与样式体系',
+    priority: 80,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'exact', value: 'tailwindcss.com' },
+      { type: 'domain', operator: 'exact', value: 'getbootstrap.com' },
+      { type: 'domain', operator: 'exact', value: 'ant.design' },
+      { type: 'domain', operator: 'exact', value: 'mui.com' },
+    ],
+    actions: {
+      tags: ['开发', 'UI', '前端'],
+      folder: '开发/前端',
+      contentType: 'documentation',
+    },
+  },
+  {
+    id: 'dev-runtimes',
+    name: 'Runtimes & Tooling',
+    description: 'JavaScript/TypeScript 与构建工具',
+    priority: 85,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'exact', value: 'typescriptlang.org' },
+      { type: 'domain', operator: 'exact', value: 'nodejs.org' },
+      { type: 'domain', operator: 'exact', value: 'bun.sh' },
+      { type: 'domain', operator: 'exact', value: 'deno.land' },
+      { type: 'domain', operator: 'exact', value: 'vitejs.dev' },
+      { type: 'domain', operator: 'exact', value: 'webpack.js.org' },
+    ],
+    actions: {
+      tags: ['开发', '工具链', 'JavaScript'],
+      folder: '开发/前端与工具链',
+      contentType: 'documentation',
+    },
+  },
+  {
+    id: 'programming-languages',
+    name: 'Programming Languages',
+    description: '常用编程语言官方站点',
+    priority: 85,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'exact', value: 'go.dev' },
+      { type: 'domain', operator: 'exact', value: 'golang.org' },
+      { type: 'domain', operator: 'exact', value: 'rust-lang.org' },
+      { type: 'domain', operator: 'exact', value: 'python.org' },
+    ],
+    actions: {
+      tags: ['开发', '编程语言'],
+      folder: '开发/编程语言',
+      contentType: 'documentation',
+    },
+  },
+  {
+    id: 'tech-communities',
+    name: 'Tech Communities',
+    description: '中文技术社区与问答',
+    priority: 80,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'endsWith', value: 'juejin.cn' },
+      { type: 'domain', operator: 'endsWith', value: 'csdn.net' },
+      { type: 'domain', operator: 'exact', value: 'v2ex.com' },
+      { type: 'domain', operator: 'endsWith', value: 'segmentfault.com' },
+      { type: 'domain', operator: 'endsWith', value: 'cnblogs.com' },
+    ],
+    actions: {
+      tags: ['技术', '博客', '社区'],
+      folder: '学习/技术社区',
+      contentType: 'blog',
+    },
+  },
+  {
+    id: 'productivity-notes',
+    name: 'Productivity & Notes',
+    description: '笔记与协同知识库',
+    priority: 80,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'exact', value: 'notion.so' },
+      { type: 'domain', operator: 'endsWith', value: 'yuque.com' },
+      { type: 'domain', operator: 'endsWith', value: 'wolai.com' },
+      { type: 'domain', operator: 'endsWith', value: 'feishu.cn' },
+    ],
+    actions: {
+      tags: ['办公', '知识库', '协作'],
+      folder: '办公/知识库',
+      contentType: 'tool',
+    },
+  },
+  {
+    id: 'design-tools',
+    name: 'Design & Creative',
+    description: '设计与创意工具',
+    priority: 80,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'exact', value: 'figma.com' },
+      { type: 'domain', operator: 'exact', value: 'canva.com' },
+      { type: 'domain', operator: 'exact', value: 'dribbble.com' },
+      { type: 'domain', operator: 'exact', value: 'behance.net' },
+    ],
+    actions: {
+      tags: ['设计', '工具', '素材'],
+      folder: '设计/灵感与工具',
+      contentType: 'tool',
+    },
+  },
+  {
+    id: 'ai-tools',
+    name: 'AI & LLM Services',
+    description: 'AI 与大模型工具',
+    priority: 85,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'exact', value: 'chatgpt.com' },
+      { type: 'domain', operator: 'exact', value: 'openai.com' },
+      { type: 'domain', operator: 'exact', value: 'claude.ai' },
+      { type: 'domain', operator: 'exact', value: 'deepseek.com' },
+      { type: 'domain', operator: 'exact', value: 'huggingface.co' },
+    ],
+    actions: {
+      tags: ['AI', '大模型', '工具'],
+      folder: 'AI/工具与模型',
+      contentType: 'tool',
+    },
+  },
+  {
+    id: 'knowledge-wiki',
+    name: 'Knowledge & Wiki',
+    description: '百科与知识平台',
+    priority: 75,
+    enabled: true,
+    conditions: [
+      { type: 'domain', operator: 'endsWith', value: 'wikipedia.org' },
+      { type: 'domain', operator: 'endsWith', value: 'baike.baidu.com' },
+      { type: 'domain', operator: 'endsWith', value: 'zhihu.com' },
+    ],
+    actions: {
+      tags: ['学习', '百科', '问答'],
+      folder: '学习/知识库',
+      contentType: 'article',
+    },
+  },
 ];
 
 export class AIService {
@@ -182,11 +366,20 @@ export class AIService {
     // 根据内容类型生成建议文件夹
     const suggestedFolder = this.generateFolderFromContentType(contentType, suggestedTags);
 
+    // 对于明确推断出的特定内容类型（文档、博客、视频、购物、社交、工具等），启发式置信度设为 0.75
+    // 对于通用的 article 兜底类型，若无明显特征保持低置信度（0.5），避免对任意普通网页产生误建议
+    const confidence =
+      contentType !== 'other' && contentType !== 'article'
+        ? 0.75
+        : suggestedTags.length >= 2
+        ? 0.55
+        : 0.5;
+
     return {
       suggestedFolder,
       suggestedTags,
       contentType,
-      confidence: 0.5, // 基础推荐的置信度较低
+      confidence,
       method: 'rule',
     };
   }

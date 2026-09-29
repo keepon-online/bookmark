@@ -10,7 +10,7 @@ import { deepSeekAIService } from './deepseekAIService';
 import { generateId, getUrlKey, now } from '@/lib/utils';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 import type { Bookmark, ClassificationResult } from '@/types';
-import type { OrganizeHistory } from '@/types/organizer';
+import type { OrganizeChange, OrganizeHistory } from '@/types/organizer';
 
 // 单条整理建议
 export interface OrganizeSuggestion {
@@ -150,28 +150,54 @@ export class OrganizerService {
   // 应用所选建议：移动直写 chrome.bookmarks，标签写 aux，记录历史
   async apply(suggestions: OrganizeSuggestion[]): Promise<ApplyResult> {
     const result: ApplyResult = { applied: 0, moved: 0, tagged: 0, errors: [] };
+    const changes: OrganizeChange[] = [];
 
     for (const suggestion of suggestions) {
       try {
+        let moved = false;
+        let originalParentId: string | undefined = undefined;
+        let targetFolderId: string | undefined = undefined;
+
         if (suggestion.suggestedFolderPath) {
           const folderId = await browserBookmarks.ensureFolderPath(
             suggestion.suggestedFolderPath.split('/')
           );
           if (folderId !== suggestion.node.parentId) {
+            originalParentId = suggestion.node.parentId;
+            targetFolderId = folderId;
             await browserBookmarks.moveBookmark(suggestion.node.id, folderId);
             result.moved++;
+            moved = true;
           }
         }
 
+        let appliedTags: string[] = [];
         if (suggestion.suggestedTags.length > 0) {
           const base =
             (await auxDb.bookmarkMeta.get(suggestion.node.id)) ?? defaultMeta(suggestion.node.id);
+          appliedTags = suggestion.suggestedTags;
           await auxDb.bookmarkMeta.put({
             ...base,
             tags: [...new Set([...base.tags, ...suggestion.suggestedTags])],
             aiGenerated: true,
           });
           result.tagged++;
+        }
+
+        if (moved || appliedTags.length > 0) {
+          changes.push({
+            bookmarkId: suggestion.node.id,
+            bookmarkTitle: suggestion.node.title || suggestion.node.url || '',
+            type: moved ? 'move' : 'tag',
+            from: originalParentId,
+            to: targetFolderId,
+            tags: {
+              added: appliedTags,
+              removed: [],
+            },
+            confidence: suggestion.confidence,
+            reason: suggestion.reason,
+          });
         }
 
         result.applied++;
@@ -208,17 +234,86 @@ export class OrganizerService {
           duration: 0,
           timestamp: now(),
         },
-        changes: [],
+        changes,
       });
     }
 
     return result;
   }
 
+  // 撤销/回滚指定整理记录
+  async rollback(historyId: string): Promise<{ restored: number; errors: string[] }> {
+    const history = await auxDb.organizeHistory.get(historyId);
+    if (!history) {
+      throw new Error(`未找到整理记录: ${historyId}`);
+    }
+    if (history.rolledBack) {
+      throw new Error('该记录已撤销，无法重复撤销');
+    }
+
+    const res = { restored: 0, errors: [] as string[] };
+
+    for (const change of history.changes) {
+      try {
+        let hasAction = false;
+        // 1. 如果移动过，移回原文件夹
+        if (change.from && change.to && change.from !== change.to) {
+          try {
+            await browserBookmarks.moveBookmark(change.bookmarkId, change.from);
+            hasAction = true;
+          } catch (e) {
+            res.errors.push(`还原文件夹失败 (${change.bookmarkTitle}): ${(e as Error).message}`);
+          }
+        }
+
+        // 2. 如果添加过标签，从 auxDb 移除本次添加的标签
+        if (change.tags?.added && change.tags.added.length > 0) {
+          try {
+            const meta = await auxDb.bookmarkMeta.get(change.bookmarkId);
+            if (meta) {
+              const addedSet = new Set(change.tags.added);
+              const remainingTags = meta.tags.filter((t) => !addedSet.has(t));
+              await auxDb.bookmarkMeta.put({
+                ...meta,
+                tags: remainingTags,
+              });
+              hasAction = true;
+            }
+          } catch (e) {
+            res.errors.push(`还原标签失败 (${change.bookmarkTitle}): ${(e as Error).message}`);
+          }
+        }
+
+        if (hasAction) {
+          res.restored++;
+        }
+      } catch (err) {
+        res.errors.push(`回滚变更失败 (${change.bookmarkTitle}): ${(err as Error).message}`);
+      }
+    }
+
+    await auxDb.organizeHistory.update(historyId, {
+      rolledBack: true,
+      rolledBackAt: now(),
+    });
+
+    return res;
+  }
+
   // 整理历史（新记录在前）
   async getHistory(limit = 20): Promise<OrganizeHistory[]> {
     const records = await auxDb.organizeHistory.toArray();
     return records.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
+  }
+
+  // 删除某条历史记录
+  async deleteHistory(historyId: string): Promise<void> {
+    await auxDb.organizeHistory.delete(historyId);
+  }
+
+  // 清空历史记录
+  async clearHistory(): Promise<void> {
+    await auxDb.organizeHistory.clear();
   }
 }
 

@@ -116,6 +116,8 @@ export interface OrganizeHistory {
   options: OrganizeOptions;
   result: OrganizeResult;
   changes: OrganizeChange[];
+  rolledBack?: boolean;
+  rolledBackAt?: number;
 }
 
 // 相似度计算结果

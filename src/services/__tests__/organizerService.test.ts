@@ -83,9 +83,70 @@ describe('organizerService v2', () => {
     expect(meta?.aiGenerated).toBe(true);
     expect(meta?.tags.length).toBeGreaterThan(0);
 
-    // 整理历史已记录
     const history = await organizerService.getHistory();
     expect(history).toHaveLength(1);
+    expect(history[0].changes).toHaveLength(1);
+    expect(history[0].changes[0].bookmarkId).toBe('9');
+    expect(history[0].changes[0].from).toBe('1');
+    expect(history[0].changes[0].to).toBe('folder-代码库');
+  });
+
+  it('rollback 能够将已移动的书签还原原文件夹，并剥离本次添加的标签', async () => {
+    (chrome.bookmarks.getChildren as Mock).mockResolvedValue([]);
+    (chrome.bookmarks.create as Mock).mockImplementation(async (arg: chrome.bookmarks.BookmarkCreateArg) => ({
+      id: `folder-${arg.title}`,
+      parentId: arg.parentId ?? '1',
+      title: arg.title ?? '',
+      index: 0,
+    } as chrome.bookmarks.BookmarkTreeNode));
+    (chrome.bookmarks.move as Mock).mockResolvedValue({});
+
+    const suggestions = await organizerService.suggest(
+      [node('10', 'https://github.com/test/repo', 'test/repo', 'folder-custom')],
+      {}
+    );
+    await organizerService.apply(suggestions);
+
+    const historyBefore = await organizerService.getHistory();
+    expect(historyBefore).toHaveLength(1);
+    const historyId = historyBefore[0].id;
+
+    // 清理 mock 记录准备验证 rollback
+    vi.clearAllMocks();
+
+    const rollbackRes = await organizerService.rollback(historyId);
+    expect(rollbackRes.restored).toBe(1);
+    expect(rollbackRes.errors).toHaveLength(0);
+
+    // 验证 moveBookmark 将其还原回 'folder-custom'
+    expect(chrome.bookmarks.move).toHaveBeenCalledWith('10', { parentId: 'folder-custom' });
+
+    // 验证 tags 被还原（移除添加的标签）
+    const metaAfter = await auxDb.bookmarkMeta.get('10');
+    expect(metaAfter?.tags).toHaveLength(0);
+
+    // 验证记录标记为已撤销
+    const historyAfter = await organizerService.getHistory();
+    expect(historyAfter[0].rolledBack).toBe(true);
+
+    // 再次回滚应该抛出错误阻止重复回滚
+    await expect(organizerService.rollback(historyId)).rejects.toThrow('该记录已撤销');
+  });
+
+  it('deleteHistory 与 clearHistory 能够删除指定或全部历史记录', async () => {
+    (chrome.bookmarks.getChildren as Mock).mockResolvedValue([]);
+    (chrome.bookmarks.create as Mock).mockResolvedValue({ id: 'f', parentId: '1', title: 't', index: 0 } as any);
+    (chrome.bookmarks.move as Mock).mockResolvedValue({});
+
+    const suggestions = await organizerService.suggest([node('11', 'https://github.com/a/b', 'a/b')], {});
+    await organizerService.apply(suggestions);
+
+    let history = await organizerService.getHistory();
+    expect(history).toHaveLength(1);
+
+    await organizerService.deleteHistory(history[0].id);
+    history = await organizerService.getHistory();
+    expect(history).toHaveLength(0);
   });
 
   it('suggest 当书签已在目标文件夹中时，抑制多余的移动建议', async () => {
