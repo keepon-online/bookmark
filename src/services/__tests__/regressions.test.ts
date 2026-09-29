@@ -449,4 +449,84 @@ describe('regressions', () => {
     expect(nextDomainInterval(250, 200)).toBe(250);
     expect(nextDomainInterval(500, 404)).toBe(500);
   });
+
+  it('非 http/https 协议书签（如 javascript:, chrome:// 等）自动跳过，不发网络请求也不误判', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const jsNode = makeNode('bm-js', 'javascript:alert(1)');
+    const chromeNode = makeNode('bm-chrome', 'chrome://bookmarks/');
+    const normalNode = makeNode('bm-http', 'https://normal.example.com');
+
+    fetchMock.mockResolvedValueOnce({
+      type: 'basic',
+      ok: true,
+      status: 200,
+      url: 'https://normal.example.com',
+    });
+
+    const progressRef: { total: number; skipped: number; completed: number } = {
+      total: 0,
+      skipped: 0,
+      completed: 0,
+    };
+
+    const results = await linkHealthService.checkBookmarks(
+      [jsNode, chromeNode, normalNode],
+      { retries: 0 },
+      (p) => {
+        progressRef.total = p.total;
+        progressRef.skipped = p.skipped;
+        progressRef.completed = p.completed;
+      }
+    );
+
+    // 只有正常的 http 书签被检查
+    expect(results).toHaveLength(1);
+    expect(results[0].bookmarkId).toBe('bm-http');
+    // fetch 只被正常书签调用，非 http 协议完全跳过
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('https://normal.example.com', expect.anything());
+
+    // progress 记录正确的 skipped 数量
+    expect(progressRef.skipped).toBe(2);
+    expect(progressRef.total).toBe(1);
+
+    // 非 http 书签的 meta 不会被写入 broken 或 unreachable
+    const jsMeta = await auxDb.bookmarkMeta.get('bm-js');
+    expect(jsMeta?.linkStatus).toBeUndefined();
+    const chromeMeta = await auxDb.bookmarkMeta.get('bm-chrome');
+    expect(chromeMeta?.linkStatus).toBeUndefined();
+  });
+
+  it('多域名并发队列在不同域名交替时工作线程不提前退出，全部书签完整检查', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve({
+        type: 'basic',
+        ok: true,
+        status: 200,
+        url,
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 构造 3 个域名，其中 domain1 只有 1 项，domain2 有 3 项，domain3 有 2 项
+    const nodes = [
+      makeNode('d1-1', 'https://d1.com/page1'),
+      makeNode('d2-1', 'https://d2.com/page1'),
+      makeNode('d2-2', 'https://d2.com/page2'),
+      makeNode('d2-3', 'https://d2.com/page3'),
+      makeNode('d3-1', 'https://d3.com/page1'),
+      makeNode('d3-2', 'https://d3.com/page2'),
+    ];
+
+    const results = await linkHealthService.checkBookmarks(nodes, {
+      concurrency: 4,
+      retries: 0,
+    });
+
+    // 确认所有 6 个书签全部被成功检查，没有 worker 提前退出导致遗漏
+    expect(results).toHaveLength(6);
+    expect(results.map((r) => r.bookmarkId).sort()).toEqual(nodes.map((n) => n.id).sort());
+  });
 });

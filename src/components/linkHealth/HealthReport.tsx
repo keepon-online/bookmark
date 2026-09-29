@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import { useBrowserBookmarkStore } from '@/stores';
-import { linkHealthService } from '@/services/linkHealthService';
+import { linkHealthService, ensureHostPermissions } from '@/services/linkHealthService';
 import type { BrowserBookmarkNode, LinkHealthReport, CheckProgress } from '@/types';
 import {
   ScanSettingsPanel,
@@ -27,25 +27,6 @@ import {
   type ScanSettings,
 } from './ScanSettingsPanel';
 import { BrokenLinksPanel } from './BrokenLinksPanel';
-
-const HOST_ORIGINS = ['http://*/*', 'https://*/*'];
-
-// 申请网站访问权限（需在用户手势中调用，如按钮点击）。
-// 未授权时 fetch 受 CORS 限制，大多数站点将无法检测。
-async function ensureHostPermissions(): Promise<boolean> {
-  if (typeof chrome === 'undefined' || !chrome.permissions) {
-    return true; // 测试环境
-  }
-  try {
-    const already = await chrome.permissions.contains({ origins: HOST_ORIGINS });
-    if (already) {
-      return true;
-    }
-    return await chrome.permissions.request({ origins: HOST_ORIGINS });
-  } catch {
-    return false;
-  }
-}
 
 interface HealthReportProps {
   onCheckAll?: () => void;
@@ -81,7 +62,10 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   // 只重查待检查项（从未检查或未得出结论），不受跳过窗口限制
   const handleCheckPending = async () => {
     const state = useBrowserBookmarkStore.getState();
-    const pendingNodes = state.bookmarks.filter((node) => !state.meta[node.id]?.linkStatus);
+    const pendingNodes = state.bookmarks.filter((node) => {
+      const s = state.meta[node.id]?.linkStatus;
+      return !s || s === 'pending';
+    });
     await runCheck({ ...toBatchCheckOptions(scanSettings), skipRecentHours: 0 }, pendingNodes);
   };
 

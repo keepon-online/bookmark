@@ -114,7 +114,7 @@ export class ProfileService {
     for (const node of bookmarks) {
       const record = meta[node.id];
       if (!record) continue;
-      if (record.linkStatus === 'broken') brokenCount++;
+      if (record.linkStatus === 'broken' || record.linkStatus === 'unreachable') brokenCount++;
       if (record.isFavorite) favoriteCount++;
       if (record.aiGenerated) aiGeneratedCount++;
       record.tags.forEach((tag) => tagSet.add(tag));

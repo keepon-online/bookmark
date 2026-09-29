@@ -86,7 +86,8 @@ async function releaseBody(response: Response): Promise<void> {
 // 停放域名/软 404 页面特征
 const PARKED_SIGNATURES: RegExp[] = [
   /buy this domain/i,
-  /domain (?:is )?(?:for sale|parked)/i,
+  /domain (?:is |may be )?(?:for sale|parked|expired)/i,
+  /(?:godaddy|namecheap|sedo|dan\.com|hugedomains).*(?:parking|parked)/i,
   /域名(出售|交易|停放|到期|过期|被注册)/,
   /该域名.{0,12}(出售|转让|续费|过期)/,
 ];
@@ -102,6 +103,19 @@ export class HttpChecker {
    * 无权限/证书错误重试必然同样结果，直接返回。
    */
   async check(url: string, options: CheckOptions = {}): Promise<CheckResult> {
+    if (!this.isValidUrl(url)) {
+      return {
+        url,
+        status: 0,
+        isAccessible: false,
+        responseTime: 0,
+        errorMessage: 'Unsupported URL scheme',
+        checkedAt: Date.now(),
+        networkError: true,
+        errorKind: 'blocked',
+      };
+    }
+
     const opts = mergeOptions(options);
 
     for (let attempt = 0; ; attempt++) {
@@ -191,10 +205,13 @@ export class HttpChecker {
         };
       }
 
-      // GET 请求顺带做软 404 检测（读取少量正文判断是否停放页）
+      // GET 请求顺带做软 404 检测（读取少量正文判断是否停放页，带 3s 超时防挂起）
       let soft404 = false;
       if (options.method === 'GET' && response.status === 200) {
-        soft404 = await this.sniffSoft404(response);
+        soft404 = await Promise.race([
+          this.sniffSoft404(response),
+          sleep(3000).then(() => false),
+        ]);
       } else {
         await releaseBody(response);
       }

@@ -76,6 +76,11 @@ export function ScanSettingsPanel({
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [whitelistText, setWhitelistText] = React.useState(settings.whitelist.join('\n'));
 
+  // 保证异步加载设置后白名单文本框能正确同步
+  React.useEffect(() => {
+    setWhitelistText(settings.whitelist.join('\n'));
+  }, [settings.whitelist]);
+
   const handleTimeoutChange = (value: number) => {
     onChange({ ...settings, timeout: value });
   };

@@ -58,6 +58,18 @@ export function App() {
 
   const filtered = useFilteredBookmarks();
   const tags = React.useMemo(() => selectAllTags(meta).slice(0, 30), [meta]);
+  const brokenCount = React.useMemo(
+    () =>
+      bookmarks.filter((b) => {
+        const status = meta[b.id]?.linkStatus;
+        return status === 'broken' || status === 'unreachable';
+      }).length,
+    [bookmarks, meta]
+  );
+  const favoriteCount = React.useMemo(
+    () => bookmarks.filter((b) => meta[b.id]?.isFavorite).length,
+    [bookmarks, meta]
+  );
 
   // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {
@@ -171,12 +183,14 @@ export function App() {
                 <SidebarItem
                   icon={<Heart className="h-4 w-4" />}
                   label="收藏"
+                  count={favoriteCount > 0 ? favoriteCount : undefined}
                   active={activeView === 'favorites'}
                   onClick={() => handleQuickView('favorites')}
                 />
                 <SidebarItem
                   icon={<AlertTriangle className="h-4 w-4" />}
                   label="失效链接"
+                  count={brokenCount > 0 ? brokenCount : undefined}
                   active={activeView === 'broken'}
                   onClick={() => handleQuickView('broken')}
                 />

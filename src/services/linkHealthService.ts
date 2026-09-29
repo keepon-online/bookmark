@@ -59,6 +59,36 @@ export function nextDomainInterval(current: number, statusCode: number): number 
   return current;
 }
 
+export const HOST_ORIGINS = ['http://*/*', 'https://*/*'];
+
+// 申请网站访问权限（需在用户手势中调用，如按钮点击）。
+// 未授权时 fetch 受 CORS 限制，大多数站点将无法检测。
+export async function ensureHostPermissions(): Promise<boolean> {
+  if (typeof chrome === 'undefined' || !chrome.permissions) {
+    return true; // 测试环境
+  }
+  try {
+    const already = await chrome.permissions.contains({ origins: HOST_ORIGINS });
+    if (already) {
+      return true;
+    }
+    return await chrome.permissions.request({ origins: HOST_ORIGINS });
+  } catch {
+    return false;
+  }
+}
+
+// 仅 http / https 链接可通过网络检查，跳过 chrome://, javascript:, file:// 等内部/本地协议
+export function isCheckableUrl(url?: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 // 白名单匹配：精确域名或其子域名（example.com 覆盖 docs.example.com）
 function isWhitelisted(url: string, whitelist: Set<string>): boolean {
   const host = getDomain(url).toLowerCase();
@@ -89,6 +119,7 @@ interface DomainQueue {
   next: number;
   busy: boolean;
   intervalMs: number;
+  nextAvailableTime: number;
 }
 
 export class LinkHealthService {
@@ -145,7 +176,11 @@ export class LinkHealthService {
       const pending: Array<{ node: BrowserBookmarkNode; meta?: AuxBookmarkMeta }> = [];
       let skipped = 0;
       nodes.forEach((node, index) => {
-        if (!node.url) return;
+        // 过滤非网络可检测链接（如 javascript: bookmarklet, chrome:// 等）
+        if (!node.url || !isCheckableUrl(node.url)) {
+          skipped++;
+          return;
+        }
         // 白名单域名（含子域名）跳过检查
         if (isWhitelisted(node.url, whitelist)) {
           skipped++;
@@ -169,6 +204,19 @@ export class LinkHealthService {
         pending.push({ node, meta });
       });
 
+      if (pending.length === 0) {
+        onProgress?.({
+          total: 0,
+          completed: 0,
+          current: '',
+          success: 0,
+          failed: 0,
+          skipped,
+          startTime: now(),
+        });
+        return [];
+      }
+
       // 按域名分组：同域名串行 + 间隔，不同域名并行
       const queuesByDomain = new Map<string, typeof pending>();
       for (const item of pending) {
@@ -183,6 +231,7 @@ export class LinkHealthService {
         next: 0,
         busy: false,
         intervalMs: SAME_DOMAIN_INTERVAL_MS,
+        nextAvailableTime: 0,
       }));
       let domainCursor = 0;
 
@@ -193,9 +242,14 @@ export class LinkHealthService {
       let failed = 0;
 
       const pickDomain = (): DomainQueue | undefined => {
+        const currentTime = now();
         for (let i = 0; i < domainQueues.length; i++) {
           const queue = domainQueues[(domainCursor + i) % domainQueues.length];
-          if (queue.next < queue.items.length && !queue.busy) {
+          if (
+            queue.next < queue.items.length &&
+            !queue.busy &&
+            currentTime >= queue.nextAvailableTime
+          ) {
             domainCursor = (domainCursor + i + 1) % domainQueues.length;
             return queue;
           }
@@ -207,7 +261,13 @@ export class LinkHealthService {
         while (!this.stopRequested) {
           const domainQueue = pickDomain();
           if (!domainQueue) {
-            return; // 全部完成
+            const hasMore = domainQueues.some((q) => q.next < q.items.length);
+            if (!hasMore) {
+              return; // 全部完成
+            }
+            // 仍有未处理书签（相关域名在冷却中或其它 worker 正忙），稍候重试
+            await sleep(25);
+            continue;
           }
           domainQueue.busy = true;
           try {
@@ -345,9 +405,10 @@ export class LinkHealthService {
                   : undefined,
             });
 
-            // 同域名请求间隔（遇限流自动放大）
+            // 同域名请求冷却（遇限流自动放大），设置该域名的下次可用时间戳，
+            // 当前 worker 即可立即转去处理其它可用域名，无需闲置等待
             domainQueue.intervalMs = nextDomainInterval(domainQueue.intervalMs, check.status);
-            await sleep(domainQueue.intervalMs);
+            domainQueue.nextAvailableTime = now() + domainQueue.intervalMs;
           } finally {
             domainQueue.busy = false;
           }

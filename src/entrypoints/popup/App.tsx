@@ -35,6 +35,19 @@ export function App() {
   const searchQuery = useBrowserBookmarkStore((state) => state.searchQuery);
   const editor = useBookmarkEditor();
 
+  const brokenCount = React.useMemo(
+    () =>
+      bookmarks.filter((b) => {
+        const status = meta[b.id]?.linkStatus;
+        return status === 'broken' || status === 'unreachable';
+      }).length,
+    [bookmarks, meta]
+  );
+  const favoriteCount = React.useMemo(
+    () => bookmarks.filter((b) => meta[b.id]?.isFavorite).length,
+    [bookmarks, meta]
+  );
+
   // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {
     initializeTheme();
@@ -118,6 +131,7 @@ export function App() {
           <QuickAction
             icon={<FolderOpen className="h-4 w-4" />}
             label="全部"
+            count={bookmarks.length}
             active={currentView === 'all'}
             onClick={() => handleViewChange('all')}
           />
@@ -130,12 +144,14 @@ export function App() {
           <QuickAction
             icon={<Heart className="h-4 w-4" />}
             label="收藏"
+            count={favoriteCount > 0 ? favoriteCount : undefined}
             active={currentView === 'favorites'}
             onClick={() => handleViewChange('favorites')}
           />
           <QuickAction
             icon={<AlertTriangle className="h-4 w-4" />}
             label="失效"
+            count={brokenCount > 0 ? brokenCount : undefined}
             active={currentView === 'broken'}
             onClick={() => handleViewChange('broken')}
           />
@@ -223,11 +239,13 @@ export function App() {
 function QuickAction({
   icon,
   label,
+  count,
   active,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
+  count?: number;
   active: boolean;
   onClick: () => void;
 }) {
@@ -235,11 +253,16 @@ function QuickAction({
     <Button
       variant={active ? 'secondary' : 'ghost'}
       size="sm"
-      className={cn('h-8 gap-1.5 px-2.5', active && 'bg-primary/10')}
+      className={cn('h-8 gap-1.5 px-2 text-xs', active && 'bg-primary/10')}
       onClick={onClick}
     >
       {icon}
-      <span className="text-xs">{label}</span>
+      <span>{label}</span>
+      {count !== undefined && count > 0 && (
+        <span className="text-[10px] bg-muted px-1.5 py-0.2 rounded-full font-mono">
+          {count}
+        </span>
+      )}
     </Button>
   );
 }
