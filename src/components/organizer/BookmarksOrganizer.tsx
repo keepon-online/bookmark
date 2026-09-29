@@ -2,7 +2,7 @@
 // 生成建议 → 勾选确认 → 应用（移动写 chrome.bookmarks，标签写 aux）
 
 import * as React from 'react';
-import { Wand2, Loader2, CheckCircle2, AlertTriangle, Play, RotateCcw } from 'lucide-react';
+import { Wand2, Loader2, CheckCircle2, AlertTriangle, Play, RotateCcw, CheckSquare } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -75,6 +75,15 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
     });
   };
 
+  const handleSelectAll = () => {
+    setExcluded(new Set());
+  };
+
+  const handleDeselectAll = () => {
+    if (!suggestions) return;
+    setExcluded(new Set(suggestions.map((s) => s.node.id)));
+  };
+
   const handleApply = async () => {
     if (!suggestions) return;
     const selected = suggestions.filter((suggestion) => !excluded.has(suggestion.node.id));
@@ -101,7 +110,7 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
     <Card className={className}>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Wand2 className="h-4 w-4 text-purple-600" />
+          <Wand2 className="h-4 w-4 text-primary" />
           AI 智能整理
         </CardTitle>
         <p className="text-xs text-muted-foreground mt-1">
@@ -156,7 +165,7 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={handleGenerate} disabled={isGenerating}>
             {isGenerating ? (
               <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -165,26 +174,45 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
             )}
             生成建议
           </Button>
-          {suggestions && (
-            <Button
-              variant="default"
-              onClick={handleApply}
-              disabled={isApplying || selectedCount === 0}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              {isApplying ? (
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4 mr-1" />
-              )}
-              应用所选（{selectedCount}）
-            </Button>
-          )}
-          {suggestions && (
-            <Button variant="outline" onClick={() => setSuggestions(null)} disabled={isApplying}>
-              <RotateCcw className="h-4 w-4 mr-1" />
-              放弃
-            </Button>
+          {suggestions && suggestions.length > 0 && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSelectAll}
+                disabled={excluded.size === 0}
+                className="text-xs h-9"
+              >
+                <CheckSquare className="h-3.5 w-3.5 mr-1" />
+                全选
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDeselectAll}
+                disabled={selectedCount === 0}
+                className="text-xs h-9"
+              >
+                <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                取消全选
+              </Button>
+              <Button
+                variant="default"
+                onClick={handleApply}
+                disabled={isApplying || selectedCount === 0}
+              >
+                {isApplying ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 mr-1" />
+                )}
+                应用所选（{selectedCount}）
+              </Button>
+              <Button variant="outline" onClick={() => setSuggestions(null)} disabled={isApplying}>
+                <RotateCcw className="h-4 w-4 mr-1" />
+                放弃
+              </Button>
+            </>
           )}
         </div>
 

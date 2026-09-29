@@ -161,7 +161,7 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
       (bookmark) => bookmark.url && getUrlKey(bookmark.url) === urlKey
     );
     if (existing) {
-      throw new Error('Bookmark already exists');
+      throw new Error('书签已存在');
     }
     await browserBookmarks.createBookmark(input);
     await get().refresh();

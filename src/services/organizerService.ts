@@ -111,7 +111,21 @@ export class OrganizerService {
         return;
       }
 
-      const folder = moveBookmarks ? result.suggestedFolder : undefined;
+      let folder = moveBookmarks ? result.suggestedFolder : undefined;
+
+      // 如果目标文件夹与书签当前所在目录一致，则无需重复建议移动
+      if (folder) {
+        const normalize = (p: string) =>
+          p
+            .replace(/^书签栏\/?/, '')
+            .replace(/^其他书签\/?/, '')
+            .replace(/\/$/, '')
+            .trim();
+        if (normalize(node.path) === normalize(folder)) {
+          folder = undefined;
+        }
+      }
+
       const tags = applyTags
         ? result.suggestedTags.filter((tag) => !(meta[node.id]?.tags ?? []).includes(tag))
         : [];

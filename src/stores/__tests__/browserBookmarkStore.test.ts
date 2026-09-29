@@ -104,7 +104,7 @@ describe('browserBookmarkStore', () => {
 
     await expect(
       store.getState().addBookmark({ url: 'http://example.com/' })
-    ).rejects.toThrow('Bookmark already exists');
+    ).rejects.toThrow('书签已存在');
     expect(chrome.bookmarks.create).not.toHaveBeenCalled();
   });
 

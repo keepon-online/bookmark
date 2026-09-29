@@ -172,6 +172,50 @@ describe('browserBookmarksService', () => {
     expect(groups[0].bookmarks.map((bookmark) => bookmark.id)).toEqual(['b', 'c', 'a']);
   });
 
+  it('groupDuplicates 智能保留策略优先保留被收藏或带标签的书签', () => {
+    const node = (id: string, url: string, dateAdded: number, path = '书签栏'): BrowserBookmarkNode => ({
+      id,
+      parentId: '1',
+      title: id,
+      url,
+      index: 0,
+      dateAdded,
+      path,
+    });
+
+    const meta: Record<string, any> = {
+      a: { bookmarkId: 'a', tags: ['工作', '必看'], isFavorite: false, visitCount: 5 },
+      b: { bookmarkId: 'b', tags: [], isFavorite: false, visitCount: 0 },
+      c: { bookmarkId: 'c', tags: [], isFavorite: true, visitCount: 1 },
+    };
+
+    // 虽然 b 最新 (300)，但是 c 是收藏项 (+1000)，a 有2个标签 (+200)
+    const groups = BrowserBookmarksService.groupDuplicates(
+      [
+        node('a', 'https://example.com/test', 100, '书签栏/项目'),
+        node('b', 'https://example.com/test', 300, '书签栏'),
+        node('c', 'https://example.com/test', 200, '书签栏'),
+      ],
+      meta,
+      'smart'
+    );
+
+    expect(groups[0].keepId).toBe('c');
+    expect(groups[0].bookmarks.map((b) => b.id)).toEqual(['c', 'a', 'b']);
+
+    // 当指定 'oldest' 策略时，应当保留最早添加的 'a' (dateAdded: 100)
+    const oldestGroups = BrowserBookmarksService.groupDuplicates(
+      [
+        node('a', 'https://example.com/test', 100),
+        node('b', 'https://example.com/test', 300),
+        node('c', 'https://example.com/test', 200),
+      ],
+      meta,
+      'oldest'
+    );
+    expect(oldestGroups[0].keepId).toBe('a');
+  });
+
   it('findEmptyFolders 只返回既无书签也无子文件夹的叶子文件夹', () => {
     const folder = (id: string, parentId: string): BrowserBookmarkNode => ({
       id,

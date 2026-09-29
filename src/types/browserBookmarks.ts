@@ -46,12 +46,15 @@ export interface AuxBookmarkMeta {
   aiGenerated?: boolean;
 }
 
+// 重复书签保留策略
+export type DuplicateRetentionStrategy = 'smart' | 'newest' | 'oldest';
+
 // 重复书签分组（轻量版，基于浏览器节点）
 export interface BrowserDuplicateGroup {
   urlKey: string;
   url: string; // 组内原始 URL
-  bookmarks: BrowserBookmarkNode[]; // 按 dateAdded 降序
-  keepId: string; // 建议保留（最新添加）
+  bookmarks: BrowserBookmarkNode[]; // 按 dateAdded 降序或优先级降序
+  keepId: string; // 建议保留
 }
 
 // 侧边栏/弹出层快速过滤

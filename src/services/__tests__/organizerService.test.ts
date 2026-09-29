@@ -87,4 +87,15 @@ describe('organizerService v2', () => {
     const history = await organizerService.getHistory();
     expect(history).toHaveLength(1);
   });
+
+  it('suggest 当书签已在目标文件夹中时，抑制多余的移动建议', async () => {
+    const inTargetFolder: BrowserBookmarkNode = {
+      ...node('1', 'https://github.com/user/repo', 'user/repo'),
+      path: '书签栏/开发/代码库',
+    };
+    const suggestions = await organizerService.suggest([inTargetFolder], {});
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0].suggestedFolderPath).toBeUndefined();
+    expect(suggestions[0].suggestedTags.length).toBeGreaterThan(0);
+  });
 });

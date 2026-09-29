@@ -7,6 +7,8 @@ import type {
   BrowserTreeNode,
   BrowserTreeSnapshot,
   BrowserDuplicateGroup,
+  AuxBookmarkMeta,
+  DuplicateRetentionStrategy,
 } from '@/types';
 
 // Chrome 书签树的固定根节点
@@ -203,8 +205,12 @@ export class BrowserBookmarksService {
     return currentId;
   }
 
-  // 按规范化 URL 分组检测重复书签（纯函数）
-  static groupDuplicates(bookmarks: BrowserBookmarkNode[]): BrowserDuplicateGroup[] {
+  // 按规范化 URL 分组检测重复书签（纯函数，支持智能保留策略）
+  static groupDuplicates(
+    bookmarks: BrowserBookmarkNode[],
+    meta?: Record<string, AuxBookmarkMeta>,
+    strategy: DuplicateRetentionStrategy = 'smart'
+  ): BrowserDuplicateGroup[] {
     const groups = new Map<string, BrowserBookmarkNode[]>();
     for (const bookmark of bookmarks) {
       if (!bookmark.url) continue;
@@ -217,7 +223,44 @@ export class BrowserBookmarksService {
     const duplicates: BrowserDuplicateGroup[] = [];
     for (const [urlKey, nodes] of groups) {
       if (nodes.length < 2) continue;
-      const sorted = [...nodes].sort((a, b) => (b.dateAdded ?? 0) - (a.dateAdded ?? 0));
+
+      let sorted: BrowserBookmarkNode[];
+      if (strategy === 'newest') {
+        sorted = [...nodes].sort((a, b) => (b.dateAdded ?? 0) - (a.dateAdded ?? 0));
+      } else if (strategy === 'oldest') {
+        sorted = [...nodes].sort((a, b) => (a.dateAdded ?? 0) - (b.dateAdded ?? 0));
+      } else {
+        // 'smart' 智能保留策略：
+        // 1. 收藏优先 (+1000)
+        // 2. 自定义标签丰富度 (+100/个)
+        // 3. 有备注说明 (+50)
+        // 4. 访问频次高优先 (+10/次，最高200)
+        // 5. 归档到较深分类目录者优先 (+5/级深度，说明经过人工整理，而非散落在根书签栏)
+        // 6. 添加时间微弱加权作为平局决胜
+        const getScore = (node: BrowserBookmarkNode): number => {
+          const m = meta?.[node.id];
+          let score = 0;
+          if (m?.isFavorite) score += 1000;
+          if (m?.tags && m.tags.length > 0) score += m.tags.length * 100;
+          if (m?.notes && m.notes.trim()) score += 50;
+          if (m?.visitCount) score += Math.min(m.visitCount * 10, 200);
+          if (node.path) {
+            const depth = node.path.split('/').filter(Boolean).length;
+            score += depth * 5;
+          }
+          if (node.dateAdded) {
+            score += node.dateAdded / 1e14;
+          }
+          return score;
+        };
+
+        sorted = [...nodes].sort((a, b) => {
+          const scoreDiff = getScore(b) - getScore(a);
+          if (scoreDiff !== 0) return scoreDiff;
+          return (b.dateAdded ?? 0) - (a.dateAdded ?? 0);
+        });
+      }
+
       duplicates.push({
         urlKey,
         url: sorted[0].url!,
