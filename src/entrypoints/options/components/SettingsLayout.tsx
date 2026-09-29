@@ -11,7 +11,7 @@ interface SettingsLayoutProps {
 
 export function SettingsLayout({ activeTab, setActiveTab, children }: SettingsLayoutProps) {
   return React.createElement('div', {
-    className: 'flex h-screen bg-gray-50',
+    className: 'flex h-screen bg-gray-50 dark:bg-zinc-950 text-foreground transition-colors',
   },
     // 侧边栏
     React.createElement(SidebarNav, { activeTab, setActiveTab }),

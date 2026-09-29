@@ -70,59 +70,59 @@ export function BookmarksSettings() {
   };
 
   return React.createElement('div', { className: 'space-y-6' },
-    React.createElement('h2', { className: 'text-2xl font-bold text-gray-900' }, '书签管理'),
+    React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 dark:text-gray-100' }, '书签管理'),
 
     // 统计信息（来自浏览器书签树）
-    React.createElement('div', { className: 'bg-white p-6 rounded-lg shadow-sm border' },
-      React.createElement('h3', { className: 'text-lg font-semibold mb-4' }, '数据统计'),
-      React.createElement('p', { className: 'text-sm text-gray-500 mb-4' },
+    React.createElement('div', { className: 'bg-white dark:bg-zinc-900 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-zinc-800' },
+      React.createElement('h3', { className: 'text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100' }, '数据统计'),
+      React.createElement('p', { className: 'text-sm text-gray-500 dark:text-gray-400 mb-4' },
         '书签保存在浏览器中，由 Chrome 账号自动跨设备同步'),
       React.createElement('div', { className: 'grid grid-cols-4 gap-4' },
         React.createElement('div', { className: 'text-center' },
-          React.createElement('div', { className: 'text-3xl font-bold text-purple-600' }, bookmarks.length),
-          React.createElement('div', { className: 'text-sm text-gray-600' }, '书签')
+          React.createElement('div', { className: 'text-3xl font-bold text-primary' }, bookmarks.length),
+          React.createElement('div', { className: 'text-sm text-gray-600 dark:text-gray-400' }, '书签')
         ),
         React.createElement('div', { className: 'text-center' },
-          React.createElement('div', { className: 'text-3xl font-bold text-blue-600' }, folders.length),
-          React.createElement('div', { className: 'text-sm text-gray-600' }, '文件夹')
+          React.createElement('div', { className: 'text-3xl font-bold text-blue-600 dark:text-blue-400' }, folders.length),
+          React.createElement('div', { className: 'text-sm text-gray-600 dark:text-gray-400' }, '文件夹')
         ),
         React.createElement('div', { className: 'text-center' },
-          React.createElement('div', { className: 'text-3xl font-bold text-green-600' }, tagCount),
-          React.createElement('div', { className: 'text-sm text-gray-600' }, '标签')
+          React.createElement('div', { className: 'text-3xl font-bold text-emerald-600 dark:text-emerald-400' }, tagCount),
+          React.createElement('div', { className: 'text-sm text-gray-600 dark:text-gray-400' }, '标签')
         ),
         React.createElement('div', { className: 'text-center' },
-          React.createElement('div', { className: 'text-3xl font-bold text-amber-600' }, metaCount),
-          React.createElement('div', { className: 'text-sm text-gray-600' }, '有元数据的书签')
+          React.createElement('div', { className: 'text-3xl font-bold text-amber-600 dark:text-amber-400' }, metaCount),
+          React.createElement('div', { className: 'text-sm text-gray-600 dark:text-gray-400' }, '有元数据的书签')
         )
       )
     ),
 
     // 增强元数据管理
-    React.createElement('div', { className: 'bg-white p-6 rounded-lg shadow-sm border' },
-      React.createElement('h3', { className: 'text-lg font-semibold mb-4' }, '增强元数据备份'),
-      React.createElement('p', { className: 'text-sm text-gray-500 mb-4' },
+    React.createElement('div', { className: 'bg-white dark:bg-zinc-900 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-zinc-800' },
+      React.createElement('h3', { className: 'text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100' }, '增强元数据备份'),
+      React.createElement('p', { className: 'text-sm text-gray-500 dark:text-gray-400 mb-4' },
         '标签、收藏、备注、死链记录等元数据保存在本扩展中，不随 Chrome 账号同步，可用 JSON 备份'),
       React.createElement('div', { className: 'space-y-3' },
-        React.createElement('div', { className: 'flex items-center justify-between p-4 border rounded-lg' },
+        React.createElement('div', { className: 'flex items-center justify-between p-4 border border-gray-200 dark:border-zinc-800 rounded-lg' },
           React.createElement('div', null,
-            React.createElement('div', { className: 'font-medium' }, '导出元数据'),
-            React.createElement('div', { className: 'text-sm text-gray-500' }, '导出为 JSON 文件备份')
+            React.createElement('div', { className: 'font-medium text-gray-900 dark:text-gray-100' }, '导出元数据'),
+            React.createElement('div', { className: 'text-sm text-gray-500 dark:text-gray-400' }, '导出为 JSON 文件备份')
           ),
           React.createElement('button', {
             onClick: handleExport,
             disabled: isExporting,
-            className: 'px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300',
+            className: 'px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 dark:disabled:bg-zinc-700',
           }, isExporting ? '导出中...' : '导出')
         ),
-        React.createElement('div', { className: 'flex items-center justify-between p-4 border rounded-lg' },
+        React.createElement('div', { className: 'flex items-center justify-between p-4 border border-gray-200 dark:border-zinc-800 rounded-lg' },
           React.createElement('div', null,
-            React.createElement('div', { className: 'font-medium' }, '导入元数据'),
-            React.createElement('div', { className: 'text-sm text-gray-500' }, '从备份 JSON 合并导入')
+            React.createElement('div', { className: 'font-medium text-gray-900 dark:text-gray-100' }, '导入元数据'),
+            React.createElement('div', { className: 'text-sm text-gray-500 dark:text-gray-400' }, '从备份 JSON 合并导入')
           ),
           React.createElement('input', {
             type: 'file',
             accept: 'application/json',
-            className: 'text-sm',
+            className: 'text-sm text-gray-600 dark:text-gray-400 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:bg-primary file:text-white',
             onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
               const file = e.target.files?.[0];
               if (file) void handleImportFile(file);
@@ -130,10 +130,10 @@ export function BookmarksSettings() {
             },
           })
         ),
-        React.createElement('div', { className: 'flex items-center justify-between p-4 border border-red-200 rounded-lg' },
+        React.createElement('div', { className: 'flex items-center justify-between p-4 border border-red-200 dark:border-red-950/80 rounded-lg' },
           React.createElement('div', null,
-            React.createElement('div', { className: 'font-medium text-red-600' }, '清空元数据'),
-            React.createElement('div', { className: 'text-sm text-gray-500' }, '仅删除增强元数据，浏览器书签不受影响')
+            React.createElement('div', { className: 'font-medium text-red-600 dark:text-red-400' }, '清空元数据'),
+            React.createElement('div', { className: 'text-sm text-gray-500 dark:text-gray-400' }, '仅删除增强元数据，浏览器书签不受影响')
           ),
           React.createElement('button', {
             onClick: handleClearAux,
@@ -142,7 +142,7 @@ export function BookmarksSettings() {
         )
       ),
       message && React.createElement('div', {
-        className: 'mt-3 p-3 bg-blue-50 text-blue-900 rounded-lg text-sm',
+        className: 'mt-3 p-3 bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 rounded-lg text-sm border border-blue-200 dark:border-blue-900',
       }, message)
     )
   );

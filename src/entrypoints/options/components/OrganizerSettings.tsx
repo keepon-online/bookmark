@@ -5,7 +5,7 @@ import { BookmarksOrganizer, DuplicateManager, EmptyFolderCleanup } from '@/comp
 
 export function OrganizerSettings() {
   return React.createElement('div', { className: 'space-y-6' },
-    React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 mb-6' }, '智能整理'),
+    React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6' }, '智能整理'),
 
     // AI 智能整理（预览-确认）
     React.createElement(BookmarksOrganizer),

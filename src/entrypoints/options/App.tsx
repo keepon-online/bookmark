@@ -2,9 +2,14 @@
 
 import * as React from 'react';
 import { SettingsPage } from './SettingsPage';
+import { initializeTheme } from '@/stores';
 import '@/styles/globals.css';
 
 export function App() {
+  React.useEffect(() => {
+    return initializeTheme();
+  }, []);
+
   return React.createElement(SettingsPage);
 }
 

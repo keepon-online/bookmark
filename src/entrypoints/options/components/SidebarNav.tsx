@@ -40,17 +40,17 @@ export function SidebarNav({ activeTab, setActiveTab }: SidebarNavProps) {
   };
 
   return React.createElement('nav', {
-    className: 'w-64 bg-white border-r border-gray-200 p-4 flex flex-col h-full',
+    className: 'w-64 bg-white dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 p-4 flex flex-col h-full transition-colors',
   },
     // 标题
     React.createElement('div', {
       className: 'mb-6',
     },
       React.createElement('h1', {
-        className: 'text-xl font-bold text-gray-900',
+        className: 'text-xl font-bold text-gray-900 dark:text-gray-100',
       }, '智能书签'),
       React.createElement('p', {
-        className: 'text-sm text-gray-500',
+        className: 'text-sm text-gray-500 dark:text-gray-400',
       }, '设置管理中心')
     ),
 
@@ -64,8 +64,8 @@ export function SidebarNav({ activeTab, setActiveTab }: SidebarNavProps) {
             onClick: () => handleNavClick(item.id),
             className: `w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
               activeTab === item.id
-                ? 'bg-purple-100 text-purple-700 font-medium'
-                : 'text-gray-700 hover:bg-gray-100'
+                ? 'bg-primary/10 text-primary font-medium dark:bg-primary/20'
+                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-800'
             }`,
           },
             React.createElement(item.icon, {
@@ -83,7 +83,7 @@ export function SidebarNav({ activeTab, setActiveTab }: SidebarNavProps) {
 
       // 底部版本信息
       React.createElement('div', {
-        className: 'pt-4 border-t border-gray-200 text-xs text-gray-500',
+        className: 'pt-4 border-t border-gray-200 dark:border-zinc-800 text-xs text-gray-500 dark:text-gray-400',
       },
         'v0.6.0'
       )
