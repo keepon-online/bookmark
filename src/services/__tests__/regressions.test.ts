@@ -2,11 +2,35 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { auxDb } from '@/lib/auxDatabase';
 import { httpChecker } from '@/lib/httpChecker';
-import { linkHealthService } from '@/services/linkHealthService';
+import { linkHealthService, classifyLinkStatus, nextDomainInterval } from '@/services/linkHealthService';
+
+function makeNode(id: string, url: string) {
+  return {
+    id,
+    parentId: '1',
+    title: id,
+    url,
+    index: 0,
+    dateAdded: 100,
+    path: '书签栏',
+  };
+}
+
+// 构造带正文的 200 响应（用于软 404 检测）
+function htmlResponse(url: string, body: string) {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    },
+  });
+  return { type: 'basic', ok: true, status: 200, url, body: stream };
+}
 
 describe('regressions', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
     localStorage.clear();
     await auxDb.delete();
     await auxDb.open();
@@ -68,7 +92,7 @@ describe('regressions', () => {
       path: '书签栏',
     };
 
-    const results = await linkHealthService.checkBookmarks([unreachableNode]);
+    const results = await linkHealthService.checkBookmarks([unreachableNode], { retries: 0 });
 
     expect(results[0].isAccessible).toBe(false);
 
@@ -208,5 +232,221 @@ describe('regressions', () => {
     expect(resetMeta?.isFavorite).toBe(true);
     expect(resetMeta?.visitCount).toBe(2);
     expect(await auxDb.linkChecks.count()).toBe(0);
+  });
+
+  it('网络层失败按指数退避重试，第二次成功则判为可达', async () => {
+    // 已授予主机权限的环境：连接失败属于瞬时故障，应当重试
+    vi.stubGlobal('chrome', {
+      permissions: { contains: vi.fn().mockResolvedValue(true) },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ type: 'basic', ok: true, status: 200, url: 'https://flaky.example.com' });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await httpChecker.check('https://flaky.example.com', {
+      retries: 2,
+      retryDelay: 1,
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.isAccessible).toBe(true);
+    expect(result.networkError).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('无主机权限时网络失败不重试（重试必然同样结果）', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    // 模拟未授予主机权限的扩展环境
+    vi.stubGlobal('chrome', {
+      permissions: {
+        contains: vi.fn().mockResolvedValue(false),
+      },
+    });
+
+    const result = await httpChecker.check('https://blocked.example.com', {
+      retries: 2,
+      retryDelay: 1,
+    });
+
+    expect(result.networkError).toBe(true);
+    expect(result.errorKind).toBe('blocked');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('连续多轮超时后标记 unreachable，期间不判失效', async () => {
+    const abortError = Object.assign(new Error('signal is aborted without reason'), { name: 'AbortError' });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortError));
+
+    const node = makeNode('bookmark-timeout', 'https://slow.example.com/page');
+
+    // 前两轮：保持待检查
+    await linkHealthService.checkBookmarks([node], { retries: 0 });
+    expect((await auxDb.bookmarkMeta.get('bookmark-timeout'))?.linkStatus).toBeUndefined();
+    await linkHealthService.checkBookmarks([node], { retries: 0 });
+    expect((await auxDb.bookmarkMeta.get('bookmark-timeout'))?.linkStatus).toBeUndefined();
+
+    // 第三轮：连续失败达到阈值，标为无法连接
+    await linkHealthService.checkBookmarks([node], { retries: 0 });
+    const meta = await auxDb.bookmarkMeta.get('bookmark-timeout');
+    expect(meta?.linkStatus).toBe('unreachable');
+    // 检查时间有更新（受跳过窗口保护，避免反复重查）
+    expect(meta?.linkCheckedAt).toBeGreaterThan(0);
+
+    // 恢复后重新检查 → 回到正常
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      type: 'basic', ok: true, status: 200, url: 'https://slow.example.com/page',
+    }));
+    await linkHealthService.checkBookmarks([node], { retries: 0, force: true });
+    expect((await auxDb.bookmarkMeta.get('bookmark-timeout'))?.linkStatus).toBe('active');
+  });
+
+  it('5xx 瞬时故障需连续两轮确认：首轮保持待检查，第二轮才判失效', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      type: 'basic', ok: false, status: 503, url: 'https://deploying.example.com/page',
+    }));
+
+    const node = makeNode('bookmark-503', 'https://deploying.example.com/page');
+
+    await linkHealthService.checkBookmarks([node], { retries: 0 });
+    expect((await auxDb.bookmarkMeta.get('bookmark-503'))?.linkStatus).toBeUndefined();
+
+    await linkHealthService.checkBookmarks([node], { retries: 0, skipRecentHours: 0 });
+    expect((await auxDb.bookmarkMeta.get('bookmark-503'))?.linkStatus).toBe('broken');
+  });
+
+  it('429 限流不判为正常也不判失效，保持原状态', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      type: 'basic', ok: false, status: 429, url: 'https://limited.example.com/page',
+    }));
+
+    const node = makeNode('bookmark-429', 'https://limited.example.com/page');
+
+    await linkHealthService.checkBookmarks([node], { retries: 0 });
+
+    const meta = await auxDb.bookmarkMeta.get('bookmark-429');
+    expect(meta?.linkStatus).toBeUndefined();
+    expect(meta?.linkCheckedAt).toBeGreaterThan(0);
+
+    const report = await linkHealthService.getHealthReport([node], {});
+    expect(report.healthy).toBe(0);
+    expect(report.broken).toBe(0);
+    expect(report.pending).toBe(1);
+  });
+
+  it('根路径书签检测停放域名：200 但内容为域名出售页判失效', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      htmlResponse('https://parked.example.com/', '<html><title>Domain for Sale</title><body>buy this domain</body></html>')
+    ));
+
+    const node = makeNode('bookmark-parked', 'https://parked.example.com/');
+
+    const results = await linkHealthService.checkBookmarks([node], { retries: 0 });
+
+    expect(results[0].status).toBe(200);
+    expect(results[0].isAccessible).toBe(false);
+    const meta = await auxDb.bookmarkMeta.get('bookmark-parked');
+    expect(meta?.linkStatus).toBe('broken');
+  });
+
+  it('正文超过阈值的正常页面不触发软 404 误判', async () => {
+    const bigBody = '<html><body>' + 'x'.repeat(8192) + ' buy this domain </body></html>';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      htmlResponse('https://normal.example.com/', bigBody)
+    ));
+
+    const node = makeNode('bookmark-bigpage', 'https://normal.example.com/');
+
+    await linkHealthService.checkBookmarks([node], { retries: 0 });
+
+    expect((await auxDb.bookmarkMeta.get('bookmark-bigpage'))?.linkStatus).toBe('active');
+  });
+
+  it('白名单匹配子域名', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      type: 'basic', ok: true, status: 200, url: 'https://docs.example.com/x',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const node = makeNode('bookmark-subdomain', 'https://docs.example.com/x');
+
+    const results = await linkHealthService.checkBookmarks([node], {
+      whitelist: ['example.com'],
+      retries: 0,
+    });
+
+    expect(results).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('无主机权限的失败不写检查时间：授权后不受跳过窗口限制', async () => {
+    // 扩展未授予主机权限：fetch 因权限被浏览器拦截
+    vi.stubGlobal('chrome', {
+      permissions: { contains: vi.fn().mockResolvedValue(false) },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    const node = makeNode('bookmark-noperm', 'https://locked.example.com/page');
+
+    await linkHealthService.checkBookmarks([node], { retries: 0, skipRecentHours: 24 });
+    const meta = await auxDb.bookmarkMeta.get('bookmark-noperm');
+    // 状态与检查时间都不写：这是一次无效检查
+    expect(meta?.linkStatus).toBeUndefined();
+    expect(meta?.linkCheckedAt).toBeUndefined();
+
+    // 授权后（contains → true）同一链接在跳过窗口内仍会被重新检查
+    vi.stubGlobal('chrome', {
+      permissions: { contains: vi.fn().mockResolvedValue(true) },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      type: 'basic', ok: true, status: 200, url: 'https://locked.example.com/page',
+    }));
+
+    const results = await linkHealthService.checkBookmarks([node], { retries: 0, skipRecentHours: 24 });
+    expect(results).toHaveLength(1);
+    expect((await auxDb.bookmarkMeta.get('bookmark-noperm'))?.linkStatus).toBe('active');
+  });
+
+  it('网络层失败但已检查的链接受跳过窗口保护，避免反复重查', async () => {
+    vi.stubGlobal('chrome', {
+      permissions: { contains: vi.fn().mockResolvedValue(true) },
+    });
+    const abortError = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const fetchMock = vi.fn().mockRejectedValue(abortError);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const node = makeNode('bookmark-slow', 'https://slow2.example.com/page');
+
+    // 第一轮：记录检查时间但保持待检查
+    await linkHealthService.checkBookmarks([node], { retries: 0, skipRecentHours: 24 });
+    expect((await auxDb.bookmarkMeta.get('bookmark-slow'))?.linkCheckedAt).toBeGreaterThan(0);
+
+    // 24h 窗口内的第二轮：被跳过，不发请求
+    fetchMock.mockClear();
+    await linkHealthService.checkBookmarks([node], { retries: 0, skipRecentHours: 24 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('classifyLinkStatus 与 nextDomainInterval 的分级行为', () => {
+    expect(classifyLinkStatus(200)).toBe('active');
+    expect(classifyLinkStatus(301)).toBe('active');
+    expect(classifyLinkStatus(401)).toBe('active');
+    expect(classifyLinkStatus(403)).toBe('active');
+    expect(classifyLinkStatus(408)).toBe('active');
+    expect(classifyLinkStatus(429)).toBe('unknown');
+    expect(classifyLinkStatus(404)).toBe('broken');
+    expect(classifyLinkStatus(410)).toBe('broken');
+    expect(classifyLinkStatus(503)).toBe('broken');
+
+    // 限流翻倍封顶，成功减半回落
+    expect(nextDomainInterval(250, 429)).toBe(500);
+    expect(nextDomainInterval(250, 503)).toBe(500);
+    expect(nextDomainInterval(3000, 429)).toBe(4000);
+    expect(nextDomainInterval(4000, 429)).toBe(4000);
+    expect(nextDomainInterval(1000, 200)).toBe(500);
+    expect(nextDomainInterval(500, 200)).toBe(250);
+    expect(nextDomainInterval(250, 200)).toBe(250);
+    expect(nextDomainInterval(500, 404)).toBe(500);
   });
 });

@@ -33,10 +33,14 @@ export interface AuxBookmarkMeta {
   isFavorite: boolean;
   visitCount: number;
   lastVisited?: number;
-  linkStatus?: 'active' | 'broken' | 'pending';
+  // active 可达；broken 失效（连续确认）；unreachable 连续多轮无法建立连接；
+  // pending/未设置 待检查
+  linkStatus?: 'active' | 'broken' | 'pending' | 'unreachable';
   linkCheckedAt?: number;
   // 最近一次检查的 HTTP 状态码（0 = 网络层失败）
   lastStatusCode?: number;
+  // 最近一次检查的失败原因（软 404/超时等，展示用）
+  lastErrorMessage?: string;
   // 人工标记为正常：自动扫描不再改判（强制重查除外）
   linkStatusManual?: boolean;
   aiGenerated?: boolean;

@@ -15,6 +15,8 @@ export interface LinkCheckRecord {
   responseTime: number;
   errorMessage?: string;
   checkedAt: number;
+  // 网络层失败标记（未获得 HTTP 响应），用于"连续无法连接"判定
+  networkError?: boolean;
 }
 
 export class AuxDatabase extends Dexie {

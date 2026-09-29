@@ -3,10 +3,17 @@
 // 检查结果写入 aux（linkChecks 历史 + bookmarkMeta.linkStatus）。
 // 手动触发、可停止、支持跳过近期已检查项。
 //
-// 判定策略（降低误报）：
+// 判定策略（降低误报，同时保证死链能被检出）：
 // - HEAD 疑似失效（404/5xx）时用 GET 复核确认——不少站点/WAF 对
 //   HEAD 返回 404/5xx 但 GET 正常
-// - 同域名串行检查并保持间隔，避免并发触发站点限流/风控
+// - 404/410 是明确失效，立即标死；其他 4xx/5xx 可能是瞬时故障，
+//   需连续两轮都失效才标死（利用 linkChecks 历史）
+// - 网络层失败（超时/连接失败）不判死：连续多轮无法连接标
+//   unreachable，其余保持原状态，但会更新检查时间（受跳过窗口保护）
+// - 429 限流无法证实资源状态：保持原状态，并对该域名指数退避
+// - 根路径书签（首页）直接用 GET 检查并做软 404 检测——域名过期/停放
+//   时全站返回 200 的出售页
+// - 同域名串行检查并保持间隔，遇到 429/503 自动放大间隔
 // - 人工"标记为正常"的链接（linkStatusManual）自动扫描不再改判
 
 import { httpChecker } from '@/lib/httpChecker';
@@ -18,17 +25,62 @@ import type { BatchCheckOptions, CheckProgress, LinkCheckResult, LinkHealthRepor
 const DEFAULT_CONCURRENCY = 5;
 // 同域名两次请求的最小间隔（毫秒）
 const SAME_DOMAIN_INTERVAL_MS = 250;
+// 同域名遇到限流时间隔的上限（毫秒）
+const MAX_DOMAIN_INTERVAL_MS = 4000;
+// 连续多少轮网络层失败后标记 unreachable
+const UNREACHABLE_THRESHOLD = 3;
 
-// 状态码 → 链接状态。401/403/405/408/429 视为"可达但拒绝/受限"，
-// 不能判为死链（如 Cloudflare 拦截、服务器超时抱怨——能回应就说明活着）。
-export function classifyLinkStatus(status: number): 'active' | 'broken' {
+// 状态码 → 判定。401/403/405/408 视为"可达但拒绝/受限"，
+// 不能判为死链（如 Cloudflare 拦截——能回应就说明活着）。
+// 429 是限流：服务器活着但没给出资源状态的证据，判 unknown。
+export type LinkVerdict = 'active' | 'broken' | 'unknown';
+
+export function classifyLinkStatus(status: number): LinkVerdict {
   if (status >= 200 && status < 400) {
     return 'active';
   }
-  if ([401, 403, 405, 408, 429].includes(status)) {
+  if ([401, 403, 405, 408].includes(status)) {
     return 'active';
   }
+  if (status === 429) {
+    return 'unknown';
+  }
   return 'broken';
+}
+
+// 同域名请求间隔的自适应调整：限流翻倍（封顶），成功减半（回落到基准）
+export function nextDomainInterval(current: number, statusCode: number): number {
+  if (statusCode === 429 || statusCode === 503) {
+    return Math.min(current * 2, MAX_DOMAIN_INTERVAL_MS);
+  }
+  if (statusCode >= 200 && statusCode < 400) {
+    return Math.max(SAME_DOMAIN_INTERVAL_MS, Math.floor(current / 2));
+  }
+  return current;
+}
+
+// 白名单匹配：精确域名或其子域名（example.com 覆盖 docs.example.com）
+function isWhitelisted(url: string, whitelist: Set<string>): boolean {
+  const host = getDomain(url).toLowerCase();
+  if (whitelist.has(host)) {
+    return true;
+  }
+  for (const entry of whitelist) {
+    if (host.endsWith(entry.startsWith('.') ? entry : `.${entry}`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// 根路径（首页）书签：域名停放检测的目标场景
+function isRootUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname === '/' || parsed.pathname === '';
+  } catch {
+    return false;
+  }
 }
 
 interface DomainQueue {
@@ -36,6 +88,7 @@ interface DomainQueue {
   items: Array<{ node: BrowserBookmarkNode; meta?: AuxBookmarkMeta }>;
   next: number;
   busy: boolean;
+  intervalMs: number;
 }
 
 export class LinkHealthService {
@@ -50,6 +103,24 @@ export class LinkHealthService {
     return this.running;
   }
 
+  // 某书签在指定记录之前最近的若干条检查记录（新在前）。
+  // 按记录排除而非时间戳截断，避免同毫秒写入时漏掉上一轮结果
+  private async recentRecords(
+    bookmarkId: string,
+    current: LinkCheckRecord,
+    limit: number
+  ): Promise<LinkCheckRecord[]> {
+    const records = await auxDb.linkChecks.where('bookmarkId').equals(bookmarkId).toArray();
+    return records
+      .filter(
+        (record) =>
+          record.checkedAt < current.checkedAt ||
+          (record.checkedAt === current.checkedAt && record.id !== current.id)
+      )
+      .sort((a, b) => b.checkedAt - a.checkedAt)
+      .slice(0, limit);
+  }
+
   // 批量检查书签节点：结果写 aux 并返回
   async checkBookmarks(
     nodes: BrowserBookmarkNode[],
@@ -57,7 +128,7 @@ export class LinkHealthService {
     onProgress?: (progress: CheckProgress) => void
   ): Promise<LinkCheckResult[]> {
     if (this.running) {
-      return [];
+      throw new Error('已有检查正在进行中，请先停止或等待完成');
     }
     this.running = true;
     this.stopRequested = false;
@@ -75,8 +146,8 @@ export class LinkHealthService {
       let skipped = 0;
       nodes.forEach((node, index) => {
         if (!node.url) return;
-        // 白名单域名跳过检查
-        if (node.url && whitelist.has(getDomain(node.url).toLowerCase())) {
+        // 白名单域名（含子域名）跳过检查
+        if (isWhitelisted(node.url, whitelist)) {
           skipped++;
           return;
         }
@@ -111,6 +182,7 @@ export class LinkHealthService {
         items,
         next: 0,
         busy: false,
+        intervalMs: SAME_DOMAIN_INTERVAL_MS,
       }));
       let domainCursor = 0;
 
@@ -141,12 +213,19 @@ export class LinkHealthService {
           try {
             const item = domainQueue.items[domainQueue.next++];
 
+            // 首页书签直接 GET（顺带做域名停放检测），其余用 HEAD
+            const rootCheck = isRootUrl(item.node.url!);
             let check = await httpChecker.check(item.node.url!, {
               timeout: options.timeout,
               retries: options.retries,
+              method: rootCheck ? 'GET' : 'HEAD',
             });
             // HEAD 疑似失效 → GET 复核，避免 HEAD 被服务器特殊对待导致误判
-            if (!check.networkError && classifyLinkStatus(check.status) === 'broken') {
+            if (
+              !rootCheck &&
+              !check.networkError &&
+              classifyLinkStatus(check.status) === 'broken'
+            ) {
               const verified = await httpChecker.check(item.node.url!, {
                 timeout: options.timeout,
                 retries: options.retries,
@@ -165,19 +244,70 @@ export class LinkHealthService {
               responseTime: check.responseTime,
               errorMessage: check.errorMessage,
               checkedAt: check.checkedAt,
+              networkError: check.networkError || undefined,
             };
             await auxDb.linkChecks.add(record);
 
-            // 网络层失败（CORS/断网/超时，未获得 HTTP 响应）不判定失效：
-            // 保持原状态，下次检查可重试，避免把健康链接误标为死链
-            const gotResponse = !check.networkError;
-            if (gotResponse) {
-              const base = item.meta ?? defaultMeta(item.node.id);
+            // 状态判定。keepStatus = 本次证据不足以改判，保持原状态，
+            // 但仍更新检查时间（享受跳过窗口，避免反复重查同一批链接）
+            let newStatus: AuxBookmarkMeta['linkStatus'] | undefined;
+            let keepStatus = false;
+
+            if (check.networkError) {
+              const errorKind = check.errorKind ?? 'network';
+              if (errorKind === 'timeout' || errorKind === 'network') {
+                // 连续多轮无法连接才标 unreachable
+                const history = await this.recentRecords(item.node.id, record, UNREACHABLE_THRESHOLD);
+                const consecutive = history.filter(
+                  (r, i) => r.networkError && (i === 0 || history[i - 1].networkError)
+                ).length;
+                if (1 + consecutive >= UNREACHABLE_THRESHOLD) {
+                  newStatus = 'unreachable';
+                } else {
+                  keepStatus = true;
+                }
+              } else {
+                // blocked/ssl 是环境问题，不动状态
+                keepStatus = true;
+              }
+            } else if (check.soft404) {
+              newStatus = 'broken';
+            } else {
+              const verdict = classifyLinkStatus(check.status);
+              if (verdict === 'active') {
+                newStatus = 'active';
+              } else if (verdict === 'unknown') {
+                // 429 限流：无法证实，保持原状态
+                keepStatus = true;
+              } else {
+                // 404/410 明确失效；其他 4xx/5xx 可能是瞬时故障，
+                // 需要上一轮也是失效才写死
+                const definitive = check.status === 404 || check.status === 410;
+                if (definitive) {
+                  newStatus = 'broken';
+                } else {
+                  const [prev] = await this.recentRecords(item.node.id, record, 1);
+                  const prevAlsoBroken =
+                    !!prev && !prev.networkError && classifyLinkStatus(prev.status) === 'broken';
+                  if (prevAlsoBroken) {
+                    newStatus = 'broken';
+                  } else {
+                    keepStatus = true;
+                  }
+                }
+              }
+            }
+
+            const base = item.meta ?? defaultMeta(item.node.id);
+            // 无主机权限的失败是无效检查：不写 meta、不占跳过窗口，
+            // 授权后下一次"检查全部/重查待检查"即可重新覆盖
+            if (!(check.networkError && check.errorKind === 'blocked')) {
               await auxDb.bookmarkMeta.put({
                 ...base,
-                linkStatus: classifyLinkStatus(check.status),
+                ...(keepStatus ? {} : { linkStatus: newStatus }),
                 linkCheckedAt: check.checkedAt,
                 lastStatusCode: check.status,
+                lastErrorMessage: check.errorMessage,
               });
             }
 
@@ -192,13 +322,13 @@ export class LinkHealthService {
             });
 
             completed++;
-            // 进度计数与最终分类一致：网络层失败计入 skipped（未检测）
-            if (!gotResponse) {
-              skipped++;
-            } else if (classifyLinkStatus(check.status) === 'active') {
+            if (newStatus === 'active') {
               success++;
-            } else {
+            } else if (newStatus === 'broken' || newStatus === 'unreachable') {
               failed++;
+            } else {
+              // 网络层失败/待确认/限流：计入 skipped（未得出结论）
+              skipped++;
             }
 
             onProgress?.({
@@ -215,8 +345,9 @@ export class LinkHealthService {
                   : undefined,
             });
 
-            // 同域名请求间隔
-            await sleep(SAME_DOMAIN_INTERVAL_MS);
+            // 同域名请求间隔（遇限流自动放大）
+            domainQueue.intervalMs = nextDomainInterval(domainQueue.intervalMs, check.status);
+            await sleep(domainQueue.intervalMs);
           } finally {
             domainQueue.busy = false;
           }
@@ -258,6 +389,7 @@ export class LinkHealthService {
   ): Promise<LinkHealthReport> {
     let healthy = 0;
     let broken = 0;
+    let unreachable = 0;
     const checkedIds: string[] = [];
 
     for (const node of nodes) {
@@ -267,6 +399,9 @@ export class LinkHealthService {
         checkedIds.push(node.id);
       } else if (status === 'broken') {
         broken++;
+        checkedIds.push(node.id);
+      } else if (status === 'unreachable') {
+        unreachable++;
         checkedIds.push(node.id);
       }
     }
@@ -293,18 +428,20 @@ export class LinkHealthService {
       }
     }
 
+    const pending = nodes.length - healthy - broken - unreachable;
     return {
       total: nodes.length,
       healthy,
       broken,
-      pending: nodes.length - healthy - broken,
+      unreachable,
+      pending,
       avgResponseTime: responseTimeCount > 0 ? responseTimeSum / responseTimeCount : 0,
       lastCheckedAt,
       byStatus: {
-        unknown: nodes.length - healthy - broken,
+        unknown: pending,
         healthy,
         broken,
-        timeout: 0,
+        timeout: unreachable,
         error: 0,
       },
     };

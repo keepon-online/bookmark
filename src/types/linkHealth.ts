@@ -31,6 +31,8 @@ export interface LinkHealthReport {
   healthy: number;
   // 失效数量
   broken: number;
+  // 连续多轮无法连接的数量
+  unreachable: number;
   // 待检查数量
   pending: number;
   // 平均响应时间

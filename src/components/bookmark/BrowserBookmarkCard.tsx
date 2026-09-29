@@ -40,6 +40,7 @@ export function BrowserBookmarkCard({
   const tags = meta?.tags ?? [];
   const isFavorite = meta?.isFavorite ?? false;
   const isBroken = meta?.linkStatus === 'broken';
+  const isUnreachable = meta?.linkStatus === 'unreachable';
 
   const handleOpen = () => {
     window.open(url, '_blank');
@@ -58,7 +59,7 @@ export function BrowserBookmarkCard({
         'group relative flex items-start gap-3 rounded-lg border p-3 transition-all',
         'hover:bg-accent/50 hover:shadow-sm',
         isSelected && 'bg-primary/10 border-primary',
-        isBroken && 'opacity-60'
+        (isBroken || isUnreachable) && 'opacity-60'
       )}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
@@ -112,6 +113,11 @@ export function BrowserBookmarkCard({
               {isBroken && (
                 <Badge variant="destructive" className="text-xs px-1 py-0">
                   失效
+                </Badge>
+              )}
+              {isUnreachable && (
+                <Badge variant="outline" className="text-xs px-1 py-0 text-orange-600">
+                  无法连接
                 </Badge>
               )}
             </div>

@@ -58,7 +58,10 @@ export function useFilteredBookmarks(): BrowserBookmarkNode[] {
     if (filter === 'favorites') {
       list = list.filter((bookmark) => meta[bookmark.id]?.isFavorite);
     } else if (filter === 'broken') {
-      list = list.filter((bookmark) => meta[bookmark.id]?.linkStatus === 'broken');
+      list = list.filter((bookmark) => {
+        const status = meta[bookmark.id]?.linkStatus;
+        return status === 'broken' || status === 'unreachable';
+      });
     } else if (filter === 'tag' && selectedTag) {
       list = list.filter((bookmark) => meta[bookmark.id]?.tags.includes(selectedTag));
     }

@@ -10,13 +10,14 @@ import {
   TrendingUp,
   TrendingDown,
   ShieldAlert,
+  WifiOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import { useBrowserBookmarkStore } from '@/stores';
 import { linkHealthService } from '@/services/linkHealthService';
-import type { LinkHealthReport, CheckProgress } from '@/types';
+import type { BrowserBookmarkNode, LinkHealthReport, CheckProgress } from '@/types';
 import {
   ScanSettingsPanel,
   loadScanSettings,
@@ -77,6 +78,13 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
     await runCheck(toBatchCheckOptions(scanSettings));
   };
 
+  // 只重查待检查项（从未检查或未得出结论），不受跳过窗口限制
+  const handleCheckPending = async () => {
+    const state = useBrowserBookmarkStore.getState();
+    const pendingNodes = state.bookmarks.filter((node) => !state.meta[node.id]?.linkStatus);
+    await runCheck({ ...toBatchCheckOptions(scanSettings), skipRecentHours: 0 }, pendingNodes);
+  };
+
   // 清除全部检查记录并全量重查（忽略跳过窗口）——用于纠正历史误判
   const handleResetAndRecheck = async () => {
     try {
@@ -89,7 +97,10 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
     await runCheck({ ...toBatchCheckOptions(scanSettings), skipRecentHours: 0 });
   };
 
-  const runCheck = async (options: ReturnType<typeof toBatchCheckOptions>) => {
+  const runCheck = async (
+    options: ReturnType<typeof toBatchCheckOptions>,
+    nodesOverride?: BrowserBookmarkNode[]
+  ) => {
     setIsChecking(true);
     setPermissionHint(false);
     try {
@@ -97,7 +108,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
       setPermissionHint(!granted);
 
       await useBrowserBookmarkStore.getState().init();
-      const nodes = useBrowserBookmarkStore.getState().bookmarks;
+      const nodes = nodesOverride ?? useBrowserBookmarkStore.getState().bookmarks;
       await linkHealthService.checkBookmarks(nodes, options, setProgress);
       // 检查结果写入了 aux，刷新 store 的 meta 映射
       await useBrowserBookmarkStore.getState().refresh();
@@ -142,6 +153,17 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
             </Button>
           ) : (
             <div className="flex items-center gap-2">
+              {report.pending > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleCheckPending}
+                  disabled={bookmarks.length === 0}
+                  title="只检查尚未得出结论的链接（从未检查或网络失败未达阈值），不受跳过窗口限制"
+                >
+                  重查待检查（{report.pending}）
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
@@ -199,7 +221,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
         )}
 
         {/* 统计卡片 */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-4 gap-2">
           <StatCard
             icon={<CheckCircle className="h-4 w-4 text-green-500" />}
             label="正常"
@@ -213,6 +235,13 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
             value={report.broken}
             total={report.total}
             color="text-red-600"
+          />
+          <StatCard
+            icon={<WifiOff className="h-4 w-4 text-orange-500" />}
+            label="无法连接"
+            value={report.unreachable}
+            total={report.total}
+            color="text-orange-600"
           />
           <StatCard
             icon={<Clock className="h-4 w-4 text-gray-400" />}
@@ -266,8 +295,8 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
         {/* 扫描设置面板 */}
         <ScanSettingsPanel settings={scanSettings} onChange={handleSettingsChange} disabled={isChecking} />
 
-        {/* 失效链接管理（有失效项时显示） */}
-        <BrokenLinksPanel scanSettings={scanSettings} />
+        {/* 失效链接管理（有失效/无法连接项时显示） */}
+        <BrokenLinksPanel scanSettings={scanSettings} scanRunning={isChecking} />
       </CardContent>
     </Card>
   );
