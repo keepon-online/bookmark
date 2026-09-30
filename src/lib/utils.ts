@@ -18,13 +18,16 @@ export function now(): number {
   return Date.now();
 }
 
-// 格式化日期
-export function formatDate(timestamp: number, locale = 'zh-CN'): string {
-  return new Intl.DateTimeFormat(locale, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(timestamp));
+// 相对时间格式化器缓存：Intl 构造开销大，避免列表渲染时每卡片重建
+const relativeTimeFormatters = new Map<string, Intl.RelativeTimeFormat>();
+
+function getRelativeTimeFormatter(locale: string): Intl.RelativeTimeFormat {
+  let rtf = relativeTimeFormatters.get(locale);
+  if (!rtf) {
+    rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+    relativeTimeFormatters.set(locale, rtf);
+  }
+  return rtf;
 }
 
 // 格式化相对时间
@@ -40,7 +43,7 @@ export function formatRelativeTime(timestamp: number, locale = 'zh-CN'): string 
   const months = Math.floor(days / 30);
   const years = Math.floor(days / 365);
 
-  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  const rtf = getRelativeTimeFormatter(locale);
 
   if (years > 0) return rtf.format(-years, 'year');
   if (months > 0) return rtf.format(-months, 'month');
@@ -78,56 +81,9 @@ export function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength - 3) + '...';
 }
 
-// 防抖
-export function debounce<T extends (...args: unknown[]) => unknown>(
-  fn: T,
-  delay: number
-): (...args: Parameters<T>) => void {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  return (...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => fn(...args), delay);
-  };
-}
-
-// 节流
-export function throttle<T extends (...args: unknown[]) => unknown>(
-  fn: T,
-  limit: number
-): (...args: Parameters<T>) => void {
-  let inThrottle = false;
-  return (...args: Parameters<T>) => {
-    if (!inThrottle) {
-      fn(...args);
-      inThrottle = true;
-      setTimeout(() => (inThrottle = false), limit);
-    }
-  };
-}
-
 // 休眠
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// 重试
-export async function retry<T>(
-  fn: () => Promise<T>,
-  maxRetries = 3,
-  delay = 1000
-): Promise<T> {
-  let lastError: Error | undefined;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error as Error;
-      if (i < maxRetries - 1) {
-        await sleep(delay * Math.pow(2, i)); // 指数退避
-      }
-    }
-  }
-  throw lastError;
 }
 
 // 验证 URL
@@ -173,25 +129,4 @@ export function extractKeywords(text: string): string[] {
   const words = cleaned.split(/\s+/).filter((w) => w.length > 1);
   // 去重
   return [...new Set(words)];
-}
-
-// 高亮匹配文本
-export function highlightText(
-  text: string,
-  query: string
-): { text: string; highlighted: boolean }[] {
-  if (!query) return [{ text, highlighted: false }];
-
-  const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
-  const parts = text.split(regex);
-
-  return parts.map((part) => ({
-    text: part,
-    highlighted: regex.test(part),
-  }));
-}
-
-// 转义正则表达式特殊字符
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -368,6 +368,7 @@ export class LinkHealthService {
                 linkCheckedAt: check.checkedAt,
                 lastStatusCode: check.status,
                 lastErrorMessage: check.errorMessage,
+                lastResponseTime: check.responseTime,
               });
             }
 
@@ -451,40 +452,28 @@ export class LinkHealthService {
     let healthy = 0;
     let broken = 0;
     let unreachable = 0;
-    const checkedIds: string[] = [];
-
-    for (const node of nodes) {
-      const status = meta[node.id]?.linkStatus;
-      if (status === 'active') {
-        healthy++;
-        checkedIds.push(node.id);
-      } else if (status === 'broken') {
-        broken++;
-        checkedIds.push(node.id);
-      } else if (status === 'unreachable') {
-        unreachable++;
-        checkedIds.push(node.id);
-      }
-    }
-
-    // 最新一次检查的平均响应时间与时间戳
+    // 聚合指标直接读 meta 冗余字段（检查时写入），不再查 linkChecks 全表
     let responseTimeSum = 0;
     let responseTimeCount = 0;
     let lastCheckedAt = 0;
-    if (checkedIds.length > 0) {
-      const records = await auxDb.linkChecks.where('bookmarkId').anyOf(checkedIds).toArray();
-      const latestByBookmark = new Map<string, LinkCheckRecord>();
-      for (const record of records) {
-        const existing = latestByBookmark.get(record.bookmarkId);
-        if (!existing || record.checkedAt > existing.checkedAt) {
-          latestByBookmark.set(record.bookmarkId, record);
+
+    for (const node of nodes) {
+      const record = meta[node.id];
+      const status = record?.linkStatus;
+      if (status === 'active' || status === 'broken' || status === 'unreachable') {
+        if (status === 'active') {
+          healthy++;
+        } else if (status === 'broken') {
+          broken++;
+        } else {
+          unreachable++;
         }
-      }
-      for (const record of latestByBookmark.values()) {
-        responseTimeSum += record.responseTime;
-        responseTimeCount++;
-        if (record.checkedAt > lastCheckedAt) {
-          lastCheckedAt = record.checkedAt;
+        if (record.linkCheckedAt && record.linkCheckedAt > lastCheckedAt) {
+          lastCheckedAt = record.linkCheckedAt;
+        }
+        if (typeof record.lastResponseTime === 'number' && record.lastResponseTime > 0) {
+          responseTimeSum += record.lastResponseTime;
+          responseTimeCount++;
         }
       }
     }

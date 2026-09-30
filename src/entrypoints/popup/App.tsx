@@ -35,18 +35,18 @@ export function App() {
   const searchQuery = useBrowserBookmarkStore((state) => state.searchQuery);
   const editor = useBookmarkEditor();
 
-  const brokenCount = React.useMemo(
-    () =>
-      bookmarks.filter((b) => {
-        const status = meta[b.id]?.linkStatus;
-        return status === 'broken' || status === 'unreachable';
-      }).length,
-    [bookmarks, meta]
-  );
-  const favoriteCount = React.useMemo(
-    () => bookmarks.filter((b) => meta[b.id]?.isFavorite).length,
-    [bookmarks, meta]
-  );
+  // 单趟遍历同时累计失效与收藏计数
+  const { brokenCount, favoriteCount } = React.useMemo(() => {
+    let broken = 0;
+    let favorite = 0;
+    for (const bookmark of bookmarks) {
+      const record = meta[bookmark.id];
+      if (!record) continue;
+      if (record.linkStatus === 'broken' || record.linkStatus === 'unreachable') broken++;
+      if (record.isFavorite) favorite++;
+    }
+    return { brokenCount: broken, favoriteCount: favorite };
+  }, [bookmarks, meta]);
 
   // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {

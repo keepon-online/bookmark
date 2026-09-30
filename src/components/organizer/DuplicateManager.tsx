@@ -52,9 +52,11 @@ export function DuplicateManager({ className }: { className?: string }) {
     );
   };
 
-  const handleScan = () => {
+  const handleScan = async () => {
     setIsScanning(true);
     try {
+      // 先让出主线程让 spinner 完成一帧绘制，再执行同步分组计算
+      await new Promise((resolve) => setTimeout(resolve, 0));
       runGrouping();
     } finally {
       setIsScanning(false);
