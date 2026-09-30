@@ -152,6 +152,8 @@ export interface BatchClassifyOptions {
   useCache?: boolean; // 是否使用缓存
   onProgress?: (current: number, total: number) => void; // 进度回调
   fallbackToLocal?: boolean; // 失败时是否回退到本地分类
+  // 用户现有文件夹完整路径，AI 分类优先映射到这些目录
+  folderTree?: string[];
 }
 
 // 成本统计

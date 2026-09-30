@@ -104,6 +104,25 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
     return bookmarks.filter((bookmark) => folderIds.has(bookmark.parentId));
   }, [bookmarks, folders, rootBookmarks, scope]);
 
+  // 用户现有文件夹完整路径（相对书签栏），作为 AI 分类的目标结构
+  const folderPaths = React.useMemo(
+    () =>
+      [
+        ...new Set(
+          folders
+            .map((f) =>
+              `${f.path}/${f.title}`
+                .replace(/^书签栏\/?/, '')
+                .replace(/^其他书签\/?/, '')
+                .replace(/\/$/, '')
+                .trim()
+            )
+            .filter((p) => p && p !== '书签栏' && p !== '其他书签')
+        ),
+      ].sort(),
+    [folders]
+  );
+
   const handleGenerate = async () => {
     setIsGenerating(true);
     setResult(null);
@@ -113,6 +132,7 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
       const data = await organizerService.suggest(scopeNodes, meta, {
         minConfidence,
         engine,
+        folderPaths,
       });
       setSuggestions(data);
       setExcluded(new Set());

@@ -254,6 +254,7 @@ export class DeepSeekAIService {
       batchSize = 20, // 默认每批20个URL（可在10-50之间调整）
       onProgress,
       fallbackToLocal = true,
+      folderTree,
     } = options;
 
     this.checkInitialized();
@@ -295,7 +296,7 @@ export class DeepSeekAIService {
         const response = await this.client!.chatCompletions({
           model: this.config!.model || 'deepseek-chat',
           messages: [
-            { role: 'system', content: this.getBatchSystemPrompt() },
+            { role: 'system', content: this.getBatchSystemPrompt(folderTree) },
             { role: 'user', content: batchPrompt },
           ],
           temperature: this.config!.temperature ?? 0.3,
@@ -379,8 +380,8 @@ export class DeepSeekAIService {
   /**
    * 获取批量分类的系统提示
    */
-  private getBatchSystemPrompt(): string {
-    return `你是一个专业的书签批量分类助手。你的任务是根据书签的 URL、标题和描述，为多个书签同时推荐合适的标签和文件夹。
+  private getBatchSystemPrompt(folderTree?: string[]): string {
+    const base = `你是一个专业的书签批量分类助手。你的任务是根据书签的 URL、标题和描述，为多个书签同时推荐合适的标签和文件夹。
 
 分类规则：
 1. 标签应该简洁明了，2-4 个字为佳
@@ -402,6 +403,34 @@ export class DeepSeekAIService {
 ]
 
 重要：必须按顺序为每个书签返回结果，数组长度必须与输入书签数量一致。`;
+    return this.injectFolderTree(base, folderTree);
+  }
+
+  // 注入用户现有文件夹结构，让 AI 分类映射到已有目录而非发明新目录
+  private injectFolderTree(prompt: string, folderTree?: string[]): string {
+    const folders = [
+      ...new Set(
+        (folderTree ?? [])
+          .map((path) =>
+            path
+              .replace(/^书签栏\/?/, '')
+              .replace(/^其他书签\/?/, '')
+              .replace(/\/$/, '')
+              .trim()
+          )
+          .filter(Boolean)
+      ),
+    ];
+    if (folders.length === 0) {
+      return prompt;
+    }
+    const shown = folders.slice(0, 60);
+    const truncated = folders.length > shown.length;
+    return `${prompt}
+
+5. **优先使用用户现有文件夹**：用户的书签已有以下文件夹结构，suggestedFolder 应优先映射到这些路径（可使用其中一级或二级前缀）：
+${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，仅展示前 60 个）' : ''}
+仅当以上文件夹确实都不合适时才建议新文件夹（保持一级或二级扁平）。`;
   }
 
   /**

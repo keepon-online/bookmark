@@ -7,7 +7,7 @@ import { browserBookmarks } from './browserBookmarksService';
 import { auxDb, defaultMeta } from '@/lib/auxDatabase';
 import { aiService } from './aiService';
 import { deepSeekAIService } from './deepseekAIService';
-import { generateId, getUrlKey, now } from '@/lib/utils';
+import { generateId, getDomain, getUrlKey, now } from '@/lib/utils';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 import type { Bookmark, ClassificationResult } from '@/types';
 import type { OrganizeChange, OrganizeHistory } from '@/types/organizer';
@@ -27,12 +27,74 @@ export interface OrganizeSuggestion {
 export interface SuggestOptions {
   // 最低置信度（默认 0.6）
   minConfidence?: number;
-  // auto：配置并启用 DeepSeek 时优先用 LLM，失败回退规则引擎
+  // auto：配置并启用 DeepSeek 时，规则未覆盖的长尾交给 LLM；rule：仅规则引擎
   engine?: 'auto' | 'rule';
   // 建议是否包含移动（默认 true）
   moveBookmarks?: boolean;
   // 建议是否包含标签（默认 true）
   applyTags?: boolean;
+  // 用户现有文件夹完整路径（如 "开发/前端"），作为 AI 分类的目标结构
+  folderPaths?: string[];
+}
+
+// 用户确认应用过的 AI 结果固化为域名级规则：
+// 下次同域名书签直接走规则，不再消耗 AI 调用
+interface LearnedDomainRule {
+  folder: string;
+  tags: string[];
+  learnedAt: number;
+}
+
+type LearnedDomainRules = Record<string, LearnedDomainRule>;
+
+const LEARNED_RULES_KEY = 'learnedDomainRules';
+const LEARNED_RULES_MAX = 200;
+// 学习回流门槛：AI 建议 + 该置信度以上 + 用户应用，才值得固化
+const LEARN_MIN_CONFIDENCE = 0.8;
+
+async function loadLearnedDomainRules(): Promise<LearnedDomainRules> {
+  try {
+    const stored = await chrome.storage.local.get(LEARNED_RULES_KEY);
+    return (stored?.[LEARNED_RULES_KEY] as LearnedDomainRules) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveLearnedDomainRules(rules: LearnedDomainRules): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [LEARNED_RULES_KEY]: rules });
+  } catch {
+    // 存储失败不影响整理主流程
+  }
+}
+
+// 命中学习规则 → 规则结果（带 matchedRuleId，使其不再送 AI）
+function matchLearnedRule(rules: LearnedDomainRules, url: string): ClassificationResult | null {
+  const domain = getDomain(url).toLowerCase();
+  const hit = domain ? rules[domain] : undefined;
+  if (!hit) {
+    return null;
+  }
+  return {
+    suggestedFolder: hit.folder,
+    suggestedTags: hit.tags,
+    contentType: 'other',
+    confidence: 0.9,
+    method: 'rule',
+    matchedRuleId: `learned:${domain}`,
+  };
+}
+
+// 容量控制：超限时按学习时间淘汰最旧的
+function trimLearnedRules(rules: LearnedDomainRules): LearnedDomainRules {
+  const entries = Object.entries(rules);
+  if (entries.length <= LEARNED_RULES_MAX) {
+    return rules;
+  }
+  return Object.fromEntries(
+    entries.sort((a, b) => b[1].learnedAt - a[1].learnedAt).slice(0, LEARNED_RULES_MAX)
+  );
 }
 
 export interface ApplyResult {
@@ -83,25 +145,48 @@ export class OrganizerService {
       engine = 'auto',
       moveBookmarks = true,
       applyTags = true,
+      folderPaths = [],
     } = options;
 
     const targets = nodes.filter((node) => node.url);
     const inputs = targets.map((node) => toClassifierInput(node, meta[node.id]));
 
-    let results: ClassificationResult[];
-    let usedEngine: 'rule' | 'deepseek' = 'rule';
+    // 规则先行（免费、确定、含用户确认过的学习规则）；
+    // AI 只处理规则未覆盖的长尾，规则命中的部分质量更稳且零成本
+    const learnedRules = await loadLearnedDomainRules();
+    const results: ClassificationResult[] = await Promise.all(
+      inputs.map(async (input) => {
+        const learned = matchLearnedRule(learnedRules, input.url);
+        return learned ?? aiService.classifyBookmark(input);
+      })
+    );
+
+    // 哪些位置最终由 AI 复核（用于逐条标注 engine 与学习回流）
+    const aiHandled = new Set<number>();
 
     if (engine === 'auto' && (await isDeepSeekEnabled())) {
-      try {
-        const stored = await chrome.storage.local.get('deepseekConfig');
-        deepSeekAIService.initialize(stored.deepseekConfig);
-        results = await deepSeekAIService.batchClassify(inputs, { batchSize: 20 });
-        usedEngine = 'deepseek';
-      } catch {
-        results = await aiService.batchClassify(inputs);
+      const longTail = inputs
+        .map((_, index) => index)
+        .filter((index) => !results[index].matchedRuleId);
+      if (longTail.length > 0) {
+        try {
+          const stored = await chrome.storage.local.get('deepseekConfig');
+          deepSeekAIService.initialize(stored.deepseekConfig);
+          const aiResults = await deepSeekAIService.batchClassify(
+            longTail.map((index) => inputs[index]),
+            { batchSize: 20, folderTree: folderPaths }
+          );
+          longTail.forEach((index, j) => {
+            const aiResult = aiResults[j];
+            if (aiResult) {
+              results[index] = aiResult;
+              aiHandled.add(index);
+            }
+          });
+        } catch {
+          // AI 不可用：保持规则结果
+        }
       }
-    } else {
-      results = await aiService.batchClassify(inputs);
     }
 
     const suggestions: OrganizeSuggestion[] = [];
@@ -134,13 +219,14 @@ export class OrganizerService {
         return;
       }
 
+      const engineUsed: 'rule' | 'deepseek' = aiHandled.has(index) ? 'deepseek' : 'rule';
       suggestions.push({
         node,
         suggestedFolderPath: folder,
         suggestedTags: tags,
         confidence: result.confidence,
-        reason: usedEngine === 'deepseek' ? 'DeepSeek 分类' : '规则引擎匹配',
-        engine: usedEngine,
+        reason: engineUsed === 'deepseek' ? 'DeepSeek 分类' : '规则引擎匹配',
+        engine: engineUsed,
       });
     });
 
@@ -204,6 +290,28 @@ export class OrganizerService {
       } catch (error) {
         result.errors.push(`${suggestion.node.title || suggestion.node.url}: ${(error as Error).message}`);
       }
+    }
+
+    // 学习回流：高置信度 AI 建议被用户确认应用 → 固化为域名级规则，
+    // 后续同域名书签直接走规则，AI 用量随使用递减
+    const learnable = suggestions.filter(
+      (suggestion) =>
+        suggestion.engine === 'deepseek' &&
+        suggestion.confidence >= LEARN_MIN_CONFIDENCE &&
+        !!suggestion.suggestedFolderPath
+    );
+    if (learnable.length > 0) {
+      const learned = await loadLearnedDomainRules();
+      for (const suggestion of learnable) {
+        const domain = getDomain(suggestion.node.url ?? '').toLowerCase();
+        if (!domain) continue;
+        learned[domain] = {
+          folder: suggestion.suggestedFolderPath!,
+          tags: suggestion.suggestedTags,
+          learnedAt: now(),
+        };
+      }
+      await saveLearnedDomainRules(trimLearnedRules(learned));
     }
 
     if (result.applied > 0) {
