@@ -11,24 +11,10 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   none: 4,
 };
 
-// 当前日志级别（可以通过配置动态修改）
-let currentLogLevel: LogLevel =
+// 当前日志级别
+const currentLogLevel: LogLevel =
   (import.meta.env.VITE_LOG_LEVEL as LogLevel) ||
   (import.meta.env.MODE === 'development' ? 'debug' : 'error');
-
-/**
- * 设置日志级别
- */
-export function setLogLevel(level: LogLevel): void {
-  currentLogLevel = level;
-}
-
-/**
- * 获取当前日志级别
- */
-export function getLogLevel(): LogLevel {
-  return currentLogLevel;
-}
 
 /**
  * 判断是否应该输出日志

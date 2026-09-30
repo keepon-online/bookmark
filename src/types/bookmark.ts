@@ -35,35 +35,4 @@ export interface Bookmark {
   meta?: BookmarkMeta;
 }
 
-export interface CreateBookmarkDTO {
-  url: string;
-  title: string;
-  description?: string;
-  folderId?: string;
-  tags?: string[];
-  favicon?: string;
-  notes?: string;
-}
-
-export interface UpdateBookmarkDTO {
-  url?: string;
-  title?: string;
-  description?: string;
-  folderId?: string;
-  tags?: string[];
-  favicon?: string;
-  notes?: string;
-  isFavorite?: boolean;
-  isArchived?: boolean;
-  status?: BookmarkStatus;
-  aiGenerated?: boolean;
-}
-
-export interface ImportResult {
-  success: boolean;
-  imported: number;
-  duplicates: number;
-  errors: string[];
-}
-
 // DuplicateGroup 移到 organizer.ts 中统一定义

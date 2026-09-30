@@ -1,32 +1,6 @@
 // 消息通信工具
 
-import type { Message, MessagePayload, MessageResponse, MessageType } from '@/types';
-
-// 发送消息到 background service worker
-export async function sendMessage<TType extends MessageType, R = unknown>(
-  type: TType,
-  payload?: MessagePayload<TType>
-): Promise<R> {
-  const requestId = crypto.randomUUID();
-  const message: Message<TType> = { type, payload, requestId };
-
-  try {
-    const response = await chrome.runtime.sendMessage<Message<TType>, MessageResponse<R>>(message);
-
-    if (!response) {
-      throw new Error('No response from background');
-    }
-
-    if (!response.success) {
-      throw new Error(response.error || 'Unknown error');
-    }
-
-    return response.data as R;
-  } catch (error) {
-    console.error(`[Messaging] Error sending message ${type}:`, error);
-    throw error;
-  }
-}
+import type { Message, MessageResponse, MessageType } from '@/types';
 
 // 监听消息（用于 background）
 export function onMessage<TType extends MessageType = MessageType, R = unknown>(

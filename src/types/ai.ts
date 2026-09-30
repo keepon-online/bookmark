@@ -1,6 +1,5 @@
 // AI 相关类型定义
 
-export type AIProvider = 'local' | 'openai' | 'claude' | 'deepseek';
 export type ClassificationMethod = 'rule' | 'nlp' | 'hybrid' | 'llm';
 
 // 分类结果
@@ -79,16 +78,6 @@ export type ContentType =
   | 'blog'
   | 'forum'
   | 'other';
-
-// AI 配置
-export interface AIConfig {
-  provider: AIProvider;
-  enabled: boolean;
-  autoClassify: boolean;
-  autoTagSuggestion: boolean;
-  minConfidence: number; // 最低置信度阈值
-  customRules: ClassificationRule[];
-}
 
 // 学习数据
 export interface LearningData {
