@@ -124,6 +124,8 @@ pnpm verify   # = typecheck && lint && test:run && build
 
 CI（`.github/workflows/ci.yml`）在 push 到 `master` 与 PR 时会跑同样的四步，本地先跑一遍能省一次往返。任何一步红了都不要提交。
 
+> CI 里几个刻意钉住的版本：runner 用 `ubuntu-24.04` 而不是 `ubuntu-latest`（后者将在 2026-11 切到 26.04，避免构建环境被无声换掉）；pnpm 固定 11，与本仓库 `pnpm-workspace.yaml` 的 `allowBuilds` 构建脚本白名单匹配；安装用 `pnpm install --frozen-lockfile`，锁文件与依赖不一致会直接失败而不是偷偷改写。
+
 提交信息用约定式前缀：`feat:` / `fix:` / `docs:` / `refactor:` / `perf:` / `test:` / `chore:`，冒号后写中文说明。
 
 ## 构建与发布
