@@ -113,6 +113,58 @@ function isRootUrl(url: string): boolean {
   }
 }
 
+export interface SelectCheckableOptions {
+  // 跳过最近检查过的窗口（小时）
+  skipRecentHours?: number;
+  // 白名单域名（含子域名）
+  whitelist?: string[];
+  // 忽略跳过窗口与人工标记（单条/所选重查用）
+  force?: boolean;
+}
+
+/**
+ * 挑出本轮真正需要检查的书签：过滤非 http(s) 链接、白名单域名、
+ * 人工标记为正常的，以及仍落在跳过窗口内的。
+ *
+ * 抽成纯函数是为了让后台的定时自动扫描能在**不发起检查**的前提下先算出候选集，
+ * 进而按批分片、被杀后可续跑；手动扫描走同一套规则，避免两处判断漂移。
+ */
+export function selectCheckableNodes(
+  nodes: BrowserBookmarkNode[],
+  meta: Record<string, AuxBookmarkMeta>,
+  options: SelectCheckableOptions = {},
+  nowTs: number = now()
+): BrowserBookmarkNode[] {
+  const skipRecentMs = (options.skipRecentHours ?? 0) * 3600_000;
+  const whitelist = new Set((options.whitelist ?? []).map((domain) => domain.toLowerCase()));
+  const force = options.force ?? false;
+
+  return nodes.filter((node) => {
+    // 过滤非网络可检测链接（如 javascript: bookmarklet, chrome:// 等）
+    if (!node.url || !isCheckableUrl(node.url)) {
+      return false;
+    }
+    // 白名单域名（含子域名）跳过检查
+    if (isWhitelisted(node.url, whitelist)) {
+      return false;
+    }
+    const record = meta[node.id];
+    // 人工标记为正常的链接不再自动改判
+    if (!force && record?.linkStatusManual) {
+      return false;
+    }
+    if (
+      !force &&
+      skipRecentMs > 0 &&
+      record?.linkCheckedAt &&
+      nowTs - record.linkCheckedAt < skipRecentMs
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 interface DomainQueue {
   domain: string;
   items: Array<{ node: BrowserBookmarkNode; meta?: AuxBookmarkMeta }>;
@@ -166,43 +218,19 @@ export class LinkHealthService {
 
     try {
       const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
-      const skipRecentMs = (options.skipRecentHours ?? 0) * 3600_000;
-      const whitelist = new Set((options.whitelist ?? []).map((domain) => domain.toLowerCase()));
-      // force：忽略跳过窗口与人工标记（用于单条/所选重查）
-      const force = options.force ?? false;
 
-      // 预取元数据以判断跳过项
+      // 预取元数据，再交给与定时自动扫描共用的筛选函数决定哪些真的要检查
       const metas = await auxDb.bookmarkMeta.bulkGet(nodes.map((node) => node.id));
-      const pending: Array<{ node: BrowserBookmarkNode; meta?: AuxBookmarkMeta }> = [];
-      let skipped = 0;
-      nodes.forEach((node, index) => {
-        // 过滤非网络可检测链接（如 javascript: bookmarklet, chrome:// 等）
-        if (!node.url || !isCheckableUrl(node.url)) {
-          skipped++;
-          return;
+      const metaById: Record<string, AuxBookmarkMeta> = {};
+      metas.forEach((meta, index) => {
+        if (meta) {
+          metaById[nodes[index].id] = meta;
         }
-        // 白名单域名（含子域名）跳过检查
-        if (isWhitelisted(node.url, whitelist)) {
-          skipped++;
-          return;
-        }
-        const meta = metas[index];
-        // 人工标记为正常的链接不再自动改判
-        if (!force && meta?.linkStatusManual) {
-          skipped++;
-          return;
-        }
-        if (
-          !force &&
-          skipRecentMs > 0 &&
-          meta?.linkCheckedAt &&
-          now() - meta.linkCheckedAt < skipRecentMs
-        ) {
-          skipped++;
-          return;
-        }
-        pending.push({ node, meta });
       });
+      const checkable = selectCheckableNodes(nodes, metaById, options);
+      const pending = checkable.map((node) => ({ node, meta: metaById[node.id] }));
+      // 检查过程中还会把"没得出结论"的（网络层失败/待确认/限流）计入 skipped，故用 let
+      let skipped = nodes.length - checkable.length;
 
       if (pending.length === 0) {
         onProgress?.({

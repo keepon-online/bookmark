@@ -487,6 +487,8 @@ if (await deepSeekAIService.testConnection()) {
 | `HOST_ORIGINS` | `['http://*/*', 'https://*/*']` | 权限申请用的 origin 列表 |
 | `ensureHostPermissions` | `ensureHostPermissions(): Promise<boolean>` | 申请网站访问权限。已授权直接 `true`；非扩展环境（无 `chrome.permissions`）返回 `true`；异常返回 `false`。**必须在用户手势中调用**（如按钮点击） |
 | `isCheckableUrl` | `isCheckableUrl(url?: string): boolean` | 仅 `http:`/`https:` 返回 `true`；`chrome://`、`javascript:`、`file://` 等返回 `false`；URL 解析失败返回 `false` |
+| `selectCheckableNodes` | `selectCheckableNodes(nodes: BrowserBookmarkNode[], meta: Record<string, AuxBookmarkMeta>, options?: SelectCheckableOptions, nowTs?: number): BrowserBookmarkNode[]` | **纯函数**：挑出本轮真正要检查的节点——过滤非 http(s)、白名单域名（含子域名）、`linkStatusManual` 人工标记、以及仍在 `skipRecentHours` 窗口内的；`options.force` 只忽略后两者。`checkBookmarks` 内部也用它，手动扫描与后台定时自动扫描因此共用同一套规则 |
+| `interface SelectCheckableOptions` | `{ skipRecentHours?: number; whitelist?: string[]; force?: boolean }` | 与 `BatchCheckOptions` 的对应字段同义（结构兼容） |
 | `class LinkHealthService` | — | 见下 |
 | 单例 `linkHealthService` | `new LinkHealthService()` | 默认实例 |
 
@@ -622,6 +624,33 @@ const history = await linkHealthService.getCheckHistory(nodes[0].id, 10);
 await linkHealthService.cleanupOldRecords(30); // 返回删除条数
 await linkHealthService.resetCheckResults();   // 清空检查结果（用于纠正历史误判）
 ```
+
+#### 扫描设置：`@/lib/scanSettings`
+
+设置原本放在 `ScanSettingsPanel.tsx` 里，抽出来是因为后台（Service Worker）的定时
+自动扫描也要读它——组件文件带着 React，后台不能引。**未收录进 `@/lib` 聚合导出**。
+
+```ts
+export interface ScanSettings {
+  timeout: number;          // 超时（秒）
+  concurrency: number;      // 并发数
+  retries: number;          // 重试次数
+  skipRecentHours: number;  // 跳过最近检查过的（小时）
+  whitelist: string[];      // 白名单域名（含子域名）
+}
+
+export const DEFAULT_SCAN_SETTINGS: ScanSettings = {
+  timeout: 10, concurrency: 5, retries: 2, skipRecentHours: 24, whitelist: [],
+};
+export const SCAN_SETTINGS_KEY = 'scan_settings'; // chrome.storage.local 的键，别改
+
+export function loadScanSettings(): Promise<ScanSettings>;
+export function saveScanSettings(settings: ScanSettings): Promise<void>;
+export function toBatchCheckOptions(settings: ScanSettings): BatchCheckOptions; // timeout 秒 → 毫秒
+```
+
+`loadScanSettings` 会把读到的值合并到默认值之上（老版本缺字段时也能用），
+读取失败时返回默认值并 `logger.error`。
 
 ---
 
@@ -1694,6 +1723,7 @@ export interface BatchCheckOptions {
 | `@/lib/auxDatabase` | `auxDb` | `AuxDatabase extends Dexie` | `defaultMeta`、`reconcileMeta`、`ORPHAN_META_TTL_MS`、`exportAuxData`、`importAuxData` |
 | `@/lib/learnedRules` | — | — | `loadLearnedRules`、`saveLearnedRules`、`clearLearnedRules`、`trimLearnedRules`、`lookupLearnedRule`、`matchLearnedRule`、`LEARNED_RULES_KEY`、`LEARNED_RULES_MAX`、`LEARNED_RULE_CONFIDENCE` |
 | `@/lib/httpChecker` | `httpChecker` | `HttpChecker`（无构造参数） | — |
+| `@/lib/scanSettings` | — | — | `loadScanSettings`、`saveScanSettings`、`toBatchCheckOptions`、`DEFAULT_SCAN_SETTINGS`、`SCAN_SETTINGS_KEY` |
 | `@/lib/deepseekClient` | — | `DeepSeekClient`（构造参数 `DeepSeekConfig`） | `createDeepSeekClient` |
 | `@/lib/urlAnalyzer` | `urlAnalyzer` | `UrlAnalyzer`（无构造参数） | — |
 | `@/lib/messaging` | — | — | `onMessage`、`getCurrentTab`、`getCurrentPageInfo` |

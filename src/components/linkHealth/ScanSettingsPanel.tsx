@@ -1,67 +1,11 @@
 // 扫描设置面板组件
+// 设置的类型、默认值与读写都在 @/lib/scanSettings（后台定时自动扫描也要用）
 
 import * as React from 'react';
 import { Settings, Info } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
-import type { BatchCheckOptions } from '@/types/linkHealth';
-import { createLogger } from '@/lib/logger';
-
-const logger = createLogger('ScanSettings');
-
-// 扫描设置
-export interface ScanSettings {
-  timeout: number;          // 超时时间 (秒)
-  concurrency: number;      // 并发数
-  retries: number;          // 重试次数
-  skipRecentHours: number;  // 跳过最近检查过的 (小时)
-  whitelist: string[];      // 白名单域名
-}
-
-// 默认设置
-export const DEFAULT_SCAN_SETTINGS: ScanSettings = {
-  timeout: 10,
-  concurrency: 5,
-  retries: 2,
-  skipRecentHours: 24,
-  whitelist: [],
-};
-
-// 存储键
-const STORAGE_KEY = 'scan_settings';
-
-// 加载设置
-export async function loadScanSettings(): Promise<ScanSettings> {
-  try {
-    const result = await chrome.storage.local.get(STORAGE_KEY);
-    if (result[STORAGE_KEY]) {
-      return { ...DEFAULT_SCAN_SETTINGS, ...result[STORAGE_KEY] };
-    }
-  } catch (e) {
-    logger.error('Failed to load', e);
-  }
-  return DEFAULT_SCAN_SETTINGS;
-}
-
-// 保存设置
-export async function saveScanSettings(settings: ScanSettings): Promise<void> {
-  try {
-    await chrome.storage.local.set({ [STORAGE_KEY]: settings });
-  } catch (e) {
-    logger.error('Failed to save', e);
-  }
-}
-
-// 转换为 BatchCheckOptions
-export function toBatchCheckOptions(settings: ScanSettings): BatchCheckOptions {
-  return {
-    timeout: settings.timeout * 1000,
-    concurrency: settings.concurrency,
-    retries: settings.retries,
-    skipRecentHours: settings.skipRecentHours,
-    whitelist: settings.whitelist,
-  };
-}
+import type { ScanSettings } from '@/lib/scanSettings';
 
 interface ScanSettingsPanelProps {
   settings: ScanSettings;

@@ -18,14 +18,14 @@ import { cn } from '@/lib/utils';
 import { useBrowserBookmarkStore } from '@/stores';
 import { linkHealthService, ensureHostPermissions } from '@/services/linkHealthService';
 import type { BrowserBookmarkNode, LinkHealthReport, CheckProgress } from '@/types';
+import { ScanSettingsPanel } from './ScanSettingsPanel';
 import {
-  ScanSettingsPanel,
   loadScanSettings,
   saveScanSettings,
   toBatchCheckOptions,
   DEFAULT_SCAN_SETTINGS,
   type ScanSettings,
-} from './ScanSettingsPanel';
+} from '@/lib/scanSettings';
 import { BrokenLinksPanel } from './BrokenLinksPanel';
 import { createLogger } from '@/lib/logger';
 

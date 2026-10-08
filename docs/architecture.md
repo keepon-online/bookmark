@@ -46,7 +46,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 |---|---|---|
 | `chrome.bookmarks` | 书签与文件夹树、创建时间、顺序 | 权威数据，绝不可丢 |
 | `SmartBookmarkAuxDB`（IndexedDB / Dexie） | `bookmarkMeta`（标签、备注、收藏、访问次数、死链状态）、`linkChecks`（检查历史）、`organizeHistory`（整理历史） | 可随时重建；丢失只影响增强体验 |
-| `chrome.storage.local` | `deepseekConfig`（API Key、模型、开关）、`deepseekClassificationCache`、`deepseekCostStats`、`learnedDomainRules`（AI 整理回流得到的域名级规则，上限 200，按学习时间淘汰）、死链检查设置 | 配置类，可重设 |
+| `chrome.storage.local` | `deepseekConfig`（API Key、模型、开关）、`deepseekClassificationCache`、`deepseekCostStats`、`learnedDomainRules`（AI 整理回流得到的域名级规则，上限 200，按学习时间淘汰）、`scan_settings`（死链扫描设置） | 配置类，可重设 |
 
 ### 状态层
 
@@ -70,6 +70,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 |---|---|
 | `lib/auxDatabase.ts` | Dexie 实例、默认元数据、元数据对账（`reconcileMeta`：按 `urlKey` 认领 + 孤儿清理）、JSON 导出/导入 |
 | `lib/httpChecker.ts` | HTTP 检查器：网络错误分级（timeout / network / ssl / blocked）、HEAD→GET 回退、指数退避、软 404（停放域名）识别 |
+| `lib/scanSettings.ts` | 死链扫描设置（超时 / 并发 / 重试 / 跳过窗口 / 白名单）的类型、默认值、读写与转换；前台面板与后台扫描共用 |
 | `lib/deepseekClient.ts` | DeepSeek HTTP 客户端（含 SSE 流式解析与自定义错误类型） |
 | `lib/messaging.ts` | 类型化的消息收发，`GET_CURRENT_TAB` 等后台专属能力 |
 | `lib/logger.ts` | 统一日志，`VITE_LOG_LEVEL` 控制级别 |

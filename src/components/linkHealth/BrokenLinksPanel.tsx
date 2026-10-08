@@ -8,8 +8,8 @@ import { Badge } from '@/components/ui/Badge';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { useBrowserBookmarkStore } from '@/stores';
 import { linkHealthService, ensureHostPermissions } from '@/services/linkHealthService';
-import type { ScanSettings } from './ScanSettingsPanel';
-import { toBatchCheckOptions } from './ScanSettingsPanel';
+import type { ScanSettings } from '@/lib/scanSettings';
+import { toBatchCheckOptions } from '@/lib/scanSettings';
 import { cn, formatRelativeTime, getDomain } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
 

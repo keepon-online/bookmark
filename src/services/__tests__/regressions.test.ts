@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { auxDb } from '@/lib/auxDatabase';
 import { httpChecker } from '@/lib/httpChecker';
-import { linkHealthService, classifyLinkStatus, nextDomainInterval } from '@/services/linkHealthService';
+import { linkHealthService, classifyLinkStatus, nextDomainInterval, selectCheckableNodes } from '@/services/linkHealthService';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 
 function makeNode(id: string, url: string): BrowserBookmarkNode {
@@ -585,8 +585,7 @@ describe('regressions', () => {
     expect(report.lastCheckedAt).toBe(3000); // 取 meta 里的最大值，而不是历史表的 5000
   });
 
-  it('resetCheckResults 清掉全部检查结果字段，但保留标签、备注与收藏', async () => {
-    await auxDb.bookmarkMeta.put(
+  it('resetCheckResults 清掉全部检查结果字段，但保留标签、备注与收藏', async () => {    await auxDb.bookmarkMeta.put(
       baseMeta('1', {
         tags: ['前端'],
         notes: '备注',
@@ -624,5 +623,39 @@ describe('regressions', () => {
     expect(after?.lastResponseTime).toBeUndefined();
     expect(after?.linkStatusManual).toBeUndefined();
     expect(await auxDb.linkChecks.count()).toBe(0);
+  });
+
+  it('selectCheckableNodes 按可检测性 / 白名单 / 人工标记 / 跳过窗口筛选候选', () => {
+    const nodes = [
+      makeNode('1', 'https://a.com/x'),
+      makeNode('2', 'javascript:void(0)'),
+      makeNode('3', 'https://skip.com/x'),
+      makeNode('4', 'https://manual.com/x'),
+      makeNode('5', 'https://recent.com/x'),
+    ];
+    const nowTs = 10_000_000;
+    const meta: Record<string, AuxBookmarkMeta> = {
+      // 人工标记为正常：自动扫描不应改判
+      '4': baseMeta('4', { linkStatusManual: true }),
+      // 1 分钟前刚检查过，落在 1 小时跳过窗口内
+      '5': baseMeta('5', { linkCheckedAt: nowTs - 60_000 }),
+    };
+
+    const picked = selectCheckableNodes(
+      nodes,
+      meta,
+      { whitelist: ['skip.com'], skipRecentHours: 1 },
+      nowTs
+    );
+    expect(picked.map((node) => node.id)).toEqual(['1']);
+
+    // force 只忽略跳过窗口与人工标记，白名单与非 http(s) 依然被过滤
+    const forced = selectCheckableNodes(
+      nodes,
+      meta,
+      { whitelist: ['skip.com'], skipRecentHours: 1, force: true },
+      nowTs
+    );
+    expect(forced.map((node) => node.id)).toEqual(['1', '4', '5']);
   });
 });
