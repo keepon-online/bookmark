@@ -1,620 +1,183 @@
 # 开发指南
 
-本文档提供智能书签扩展开发的完整指南。
+面向要在这个仓库里改代码的人。先读 [架构设计](./architecture.md) 了解"为什么这么分层"，再回来看怎么动手。
 
-## 📋 目录
+## 环境要求
 
-- [环境准备](#环境准备)
-- [项目搭建](#项目搭建)
-- [开发工作流](#开发工作流)
-- [代码规范](#代码规范)
-- [测试指南](#测试指南)
-- [构建部署](#构建部署)
-- [故障排查](#故障排查)
+| 依赖 | 版本 | 说明 |
+|---|---|---|
+| Node.js | ≥ 18 | WXT 0.20 的要求 |
+| pnpm | ≥ 8 | 仓库使用 `pnpm-lock.yaml` + `pnpm-workspace.yaml`（含 esbuild / spawn-sync 的构建脚本白名单） |
+| Chrome / Edge | ≥ 120 | 主要开发目标 |
+| Firefox | ≥ 120 | 次要目标（`-b firefox`，产物为 MV2） |
 
----
-
-## 环境准备
-
-### 系统要求
-
-- **Node.js**: >= 18.0.0
-- **pnpm**: >= 8.0.0 (推荐) 或 npm >= 9.0.0
-- **Git**: >= 2.0.0
-
-### 安装工具
+## 起步
 
 ```bash
-# 安装 pnpm (推荐)
-npm install -g pnpm
-
-# 或使用 npm
-npm install -g npm@latest
+pnpm install     # postinstall 自动执行 wxt prepare，生成 .wxt/ 类型声明
+pnpm dev         # Chrome 开发模式，带 HMR
 ```
 
-### 浏览器
+加载扩展：
 
-- **Chrome/Chromium**: >= 120 (开发主要目标)
-- **Firefox**: >= 120 (次要支持)
-- **Edge**: >= 120 (Chromium 内核)
+1. 打开 `chrome://extensions`，开启右上角「开发者模式」。
+2. 「加载已解压的扩展程序」，选择 `.output/chrome-mv3-dev`（生产构建则是 `.output/chrome-mv3`）。
+3. 改代码后自动重载；改了 `wxt.config.ts` 的 manifest 需要重启 `pnpm dev`。
 
----
+调试入口：`chrome://extensions` → 该扩展 →「检查视图 service worker」（后台）、右键扩展图标 →「检查弹出内容」（popup）。侧边栏与设置页可以直接用 DevTools 打开。
 
-## 项目搭建
+> `.wxt/`、`.output/`、`node_modules/` 都在 `.gitignore` 里，不要提交。
 
-### 1. 克隆项目
+## 代码约定
 
-```bash
-git clone https://github.com/keepon-online/bookmark.git
-cd bookmark
-```
+### 1. 数据源：这是全项目最重要的一条
 
-### 2. 安装依赖
+- **书签的增、删、改、移一律走 `src/services/browserBookmarksService.ts`**，也就是 `chrome.bookmarks`。不要新建"书签表"，不要在前端直接拼 `chrome.bookmarks.*` 调用。
+- **只有浏览器书签没有的字段才写 aux 库**（`src/lib/auxDatabase.ts`），并且必须以书签节点 id 关联。新字段加到 `AuxBookmarkMeta`（`src/types/browserBookmarks.ts`），设置页的元数据导出/导入会自动带上。
+- **写操作之后刷新快照**，不要手改 `browserBookmarkStore` 里的 `tree` / `bookmarks`。浏览器书签事件会去抖触发整树重载，手动改内存只会造成状态错位。
+- **AI 只建议，不执行。** 任何自动整理都必须遵循「生成建议 → 用户预览勾选 → 确认执行」两段式（见 `organizerService.suggest` / `apply`）。
 
-```bash
-pnpm install
-```
+### 2. TypeScript
 
-### 3. 配置环境变量
+`tsconfig.json` 开了 `strict` + `noUnusedLocals` + `noUnusedParameters`，未使用的变量/参数会直接让 `pnpm typecheck` 失败。新增领域模型放 `src/types/`，不要在组件里就地定义跨模块类型。
 
-创建 `.env` 文件：
+### 3. React 与样式
 
-```bash
-# DeepSeek API (必需)
-VITE_DEEPSEEK_API_KEY=your_api_key_here
-VITE_DEEPSEEK_BASE_URL=https://api.deepseek.com
-VITE_DEEPSEEK_MODEL=deepseek-chat
+- `jsx` 已配置为 `react-jsx`，**可以正常写 JSX**。仓库里同时存在 JSX 与 `React.createElement` 两种写法（历史原因），两种都能编译；**新代码用 JSX**，不必回头改造旧文件。
+- 样式统一走 Tailwind 工具类 + `cn()`（`src/lib/utils.ts`）；基础组件在 `src/components/ui/`，业务组件按功能放 `src/components/<feature>/`，每个目录用 `index.ts` 汇总导出。
+- 图标用 `lucide-react`，不要内联 SVG（`CircularProgress` 这类需要精确控制的除外）。
 
-# Supabase (可选,用于云端同步)
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+### 4. 依赖注入，不要直接摸 `chrome`
 
-# 日志级别
-VITE_LOG_LEVEL=debug  # 开发环境使用 debug
-```
+服务类通过构造函数或参数接收 chrome API（例如 `BrowserBookmarksService` 接收一个 `BookmarksApi`），而不是在方法里直接引用全局 `chrome`。这样测试可以注入假实现，也是现有测试能跑起来的前提。
 
-### 4. 初始化数据库
-
-WXT 会自动创建 IndexedDB，无需手动操作。
-
-### 5. 启动开发服务器
-
-```bash
-# Chrome
-pnpm dev
-
-# Firefox
-pnpm dev:firefox
-```
-
-### 6. 加载扩展
-
-1. 打开浏览器扩展管理页面
-2. 启用"开发者模式"
-3. 点击"加载已解压的扩展程序"
-4. 选择项目目录下的 `.output/chrome-mv3` (自动生成)
-
----
-
-## 开发工作流
-
-### 热重载
-
-WXT 支持热模块替换(HMR)：
-
-```bash
-pnpm dev
-```
-
-修改代码后会自动重新加载扩展。
-
-### 项目结构
-
-```
-src/
-├── components/       # React 组件
-│   ├── ui/          # 基础 UI 组件
-│   ├── bookmark/    # 书签相关组件
-│   ├── organizer/   # 整理功能组件
-│   └── ...
-├── services/        # 业务逻辑
-│   ├── bookmarkService.ts
-│   ├── folderService.ts
-│   └── ...
-├── lib/            # 工具库
-│   ├── database.ts
-│   ├── logger.ts
-│   └── ...
-├── entrypoints/    # 扩展入口
-│   ├── background/ # 后台脚本
-│   ├── options/    # 设置页面
-│   ├── popup/      # 弹出页面
-│   └── sidepanel/  # 侧边栏
-├── hooks/          # React Hooks
-├── stores/         # Zustand 状态
-├── types/          # TypeScript 类型
-└── styles/         # 全局样式
-```
-
-### 创建新组件
-
-1. 在 `src/components/` 下创建组件文件
-2. 使用 React.createElement (项目约定):
-
-```typescript
-// src/components/myFeature/MyComponent.tsx
-import * as React from 'react';
-
-interface MyComponentProps {
-  title: string;
-  onClick?: () => void;
-}
-
-export function MyComponent({ title, onClick }: MyComponentProps) {
-  return React.createElement('div', {
-    className: 'p-4 bg-white rounded',
-    onClick: onClick,
-  },
-    React.createElement('h2', { className: 'text-xl' }, title)
-  );
-}
-```
-
-3. 导出组件:
-
-```typescript
-// src/components/myFeature/index.ts
-export * from './MyComponent';
-```
-
-4. 使用组件:
-
-```typescript
-import { MyComponent } from '@/components/myFeature';
-```
-
-### 创建新服务
-
-1. 在 `src/services/` 创建服务文件:
-
-```typescript
-// src/services/myService.ts
-import { createLogger } from '@/lib/logger';
-
-const logger = createLogger('MyService');
-
-export class MyService {
-  async doSomething(data: any) {
-    logger.debug('Doing something...', data);
-    // 业务逻辑
-    return result;
-  }
-}
-
-export const myService = new MyService();
-```
-
-2. 导出服务:
-
-```typescript
-// src/services/index.ts
-export * from './myService';
-```
-
-3. 使用服务:
-
-```typescript
-import { myService } from '@/services';
-await myService.doSomething(data);
-```
-
----
-
-## 代码规范
-
-### TypeScript 规范
-
-**使用严格模式:**
-
-```typescript
-// tsconfig.json
-{
-  "compilerOptions": {
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true
-  }
-}
-```
-
-**类型定义:**
-
-```typescript
-// ✅ 好的做法
-interface Bookmark {
-  id: string;
-  url: string;
-  title: string;
-  tags: string[];
-  createdAt: number;
-}
-
-// ❌ 避免
-const bookmark: any = {};
-
-// ✅ 使用联合类型
-type Status = 'active' | 'archived' | 'broken';
-```
-
-### React 规范
-
-**使用 React.createElement:**
-
-```typescript
-// ✅ 项目约定
-import * as React from 'react';
-
-export function Component() {
-  return React.createElement('div', { className: 'p-4' },
-    React.createElement('h1', null, 'Title')
-  );
-}
-
-// ❌ 不使用 JSX (项目未配置)
-export function Component() {
-  return <div className="p-4"><h1>Title</h1></div>;
-}
-```
-
-**组件命名:**
-
-- 组件文件: PascalCase (如 `BookmarkCard.tsx`)
-- 组件函数: PascalCase (如 `BookmarkCard`)
-- 工具函数: camelCase (如 `formatDate`)
-
-### 日志规范
-
-**使用统一日志工具:**
+### 5. 日志
 
 ```typescript
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('ModuleName');
-
-// 开发调试
-logger.debug('Debug info', data);
-
-// 普通信息
-logger.info('Process completed', { count: 10 });
-
-// 警告
-logger.warn('Deprecated API used', { api: 'oldMethod' });
-
-// 错误
-logger.error('Processing failed', error);
+logger.debug('调试信息', data);
+logger.info('普通信息', { count: 10 });
+logger.warn('警告');
+logger.error('失败', error);
 ```
 
-**不要使用 console:**
+级别由 `VITE_LOG_LEVEL` 控制，未设置时开发环境 `debug`、生产 `error`。
 
-```typescript
-// ❌ 避免
-console.log('Debug info');
-console.error('Error', error);
+> 现存代码里仍有约 20 处直接调用 `console.error`（集中在初始化与网络分支），历史遗留。**新代码请统一走 logger。**
 
-// ✅ 使用 logger
-logger.debug('Debug info');
-logger.error('Error', error);
-```
+### 6. 错误处理
 
-### 错误处理
+用户可感知的失败要给出可行动的提示（例如"没有网站访问权限"而不是"检查失败"），内部错误再 `logger.error`。涉及书签写操作时，捕获异常后不要吞掉——用户需要知道哪一条没成功。
 
-**统一的错误处理模式:**
-
-```typescript
-try {
-  await someAsyncOperation();
-} catch (error) {
-  logger.error('Operation failed', error);
-  // 可选: 重新抛出或返回默认值
-  throw new Error(`Failed to process: ${error}`);
-}
-```
-
-**自定义错误类型:**
-
-```typescript
-export class BookmarkNotFoundError extends Error {
-  constructor(id: string) {
-    super(`Bookmark not found: ${id}`);
-    this.name = 'BookmarkNotFoundError';
-  }
-}
-```
-
----
-
-## 测试指南
-
-### 单元测试
-
-使用 Vitest：
-
-```typescript
-// tests/unit/bookmarkService.test.ts
-import { describe, it, expect } from 'vitest';
-import { bookmarkService } from '@/services';
-
-describe('BookmarkService', () => {
-  it('should create bookmark', async () => {
-    const bookmark = await bookmarkService.create({
-      url: 'https://test.com',
-      title: 'Test',
-    });
-
-    expect(bookmark).toBeDefined();
-    expect(bookmark.url).toBe('https://test.com');
-  });
-
-  it('should throw error for invalid URL', async () => {
-    await expect(
-      bookmarkService.create({
-        url: 'not-a-url',
-        title: 'Test',
-      })
-    ).rejects.toThrow();
-  });
-});
-```
-
-### 运行测试
+## 测试
 
 ```bash
-# 运行所有测试
-pnpm test
-
-# 监听模式
-pnpm test -- --watch
-
-# UI 模式
-pnpm test:ui
-
-# 覆盖率报告
-pnpm test:coverage
+pnpm test            # 监听模式
+pnpm test -- --run   # 单次跑完（CI 用法）
+pnpm test:ui         # 浏览器 UI
+pnpm test:coverage   # v8 覆盖率
 ```
 
-### 集成测试
+配置在 `vitest.config.ts`：环境 `happy-dom`，全局 setup 为 `src/test/setup.ts`，别名 `@` → `src`。
+
+现状：**8 个测试文件 / 48 个用例**，覆盖 `browserBookmarksService`、`organizerService`、`profileService`、`linkHealthService`、`httpChecker`、`auxDatabase` 与两个 store；`aiService`（规则引擎）、`deepseekAIService`、UI 组件尚无测试，欢迎补。
+
+三条实践约定：
+
+1. **`src/test/setup.ts` 已经把 `global.chrome` 打成了 `vi.fn` 组成的假对象**，`console.log/debug` 也被静音以减少噪音。测试里直接用 `chrome.bookmarks.create` 等，不必自己 mock 全局。
+2. **需要真 IndexedDB（也就是用到 Dexie / `auxDb`）的测试，必须在文件顶部加 `import 'fake-indexeddb/auto';`** —— setup.ts 里那个手写的 `indexedDB` 桩只够应付调用，撑不起 Dexie 的事务。参考 `src/stores/__tests__/browserBookmarkStore.test.ts`。
+3. **测服务时注入假 chrome API，而不是 mock 整个 `chrome` 全局**，这样才能验证事件订阅、参数传递等真实行为：
 
 ```typescript
-// tests/integration/sync.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
-import { db } from '@/lib/database';
-import { syncService } from '@/services';
+import { describe, expect, it, vi } from 'vitest';
+import { BrowserBookmarksService, type BookmarksApi } from '@/services/browserBookmarksService';
 
-describe('Sync Integration', () => {
-  beforeEach(async () => {
-    await db.bookmarks.clear();
-  });
+const fakeApi = {
+  getTree: async () => [rootNode],           // 自己拼一棵树
+  getChildren: async (id: string) => [],
+  create: vi.fn(async (arg) => ({ id: 'new', ...arg })),
+  update: vi.fn(async (id, changes) => ({ id, ...changes })),
+  move: vi.fn(async (id, destination) => ({ id, ...destination })),
+  remove: vi.fn(async () => undefined),
+  removeTree: vi.fn(async () => undefined),
+  onCreated: { addListener: vi.fn(), removeListener: vi.fn() },
+  onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+  onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
+  onMoved: { addListener: vi.fn(), removeListener: vi.fn() },
+  onChildrenReordered: { addListener: vi.fn(), removeListener: vi.fn() },
+} as unknown as BookmarksApi;
 
-  it('should sync bookmarks to cloud', async () => {
-    // 测试云端同步流程
-  });
-});
+const service = new BrowserBookmarksService(fakeApi);
+const snapshot = await service.loadTree();
+expect(snapshot.bookmarks).toHaveLength(1);
 ```
 
----
+完整样例见 `src/services/__tests__/browserBookmarksService.test.ts`。
 
-## 构建部署
-
-### 开发构建
+## 提交前自检
 
 ```bash
-pnpm dev
+pnpm typecheck && pnpm lint && pnpm test -- --run && pnpm build
 ```
 
-### 生产构建
+这四条目前是唯一防线（仓库尚未配置 CI）。任何一条红了都不要提交。
+
+提交信息用约定式前缀：`feat:` / `fix:` / `docs:` / `refactor:` / `perf:` / `test:` / `chore:`，冒号后写中文说明。
+
+## 构建与发布
 
 ```bash
-# Chrome
-pnpm build
-
-# Firefox
-pnpm build:firefox
+pnpm build          # .output/chrome-mv3
+pnpm build:firefox  # .output/firefox-mv2
+pnpm zip            # .output/*.zip，用于上传商店
 ```
 
-构建产物在 `.output/` 目录。
+**版本号要改两处并保持一致**：
 
-### 打包扩展
+1. `package.json` 的 `version`
+2. `wxt.config.ts` 里 `manifest.version`
 
-```bash
-# Chrome
-pnpm zip
-
-# Firefox
-pnpm zip:firefox
-```
-
-生成的 zip 文件可用于上传到扩展商店。
-
-### 发布到 Chrome Web Store
-
-1. 访问 [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole)
-2. 创建扩展或更新现有扩展
-3. 上传 `.output/chrome-mv3.zip`
-4. 填写商店信息
-5. 提交审核
-
-### 版本管理
-
-更新版本号：
-
-1. 修改 `package.json` 中的版本
-2. 修改 `wxt.config.ts` 中的版本（如果不同步）
-3. 提交更改：
+改完提交并打标签：
 
 ```bash
 git add package.json wxt.config.ts
-git commit -m "chore: bump version to 0.6.0"
-git tag v0.6.0
-git push && git push --tags
+git commit -m "chore: bump version to 0.7.0"
+git tag v0.7.0 && git push && git push --tags
 ```
 
----
+> 当前 `package.json` 与 manifest 都是 `0.6.0`，但 `master` 上已有标注为 v0.7 的功能提交（可撤销整理、建议微调、规则扩充）。发版前记得把版本号补齐。
 
 ## 故障排查
 
-### 常见问题
+### 死链检查把所有链接都判成"无法连接"
 
-#### 1. 扩展无法加载
+没拿到主机权限。跨源 `fetch` 在没有 `http://*/*`、`https://*/*` 权限时会被 CORS 拦下。检查 `chrome://extensions` → 该扩展 →「网站访问权限」是否为「在所有网站上」；代码入口是 `linkHealthService.ensureHostPermissions()`（必须由用户手势触发，即按钮点击）。未授权时 `httpChecker` 会把结果标为 `blocked` 并**不作为死链**，这是有意设计，别改成误判。
 
-**问题:** 加载扩展时提示错误
+### dev 模式下扩展页面连不上开发服务器
 
-**解决:**
-```bash
-# 检查构建输出
-pnpm build
+`wxt.config.ts` 已把 dev server 显式绑定到 `127.0.0.1:3000`。Windows + Node 17+ 下 `localhost` 可能只解析到 IPv6 `::1`，导致 Chrome 走 IPv4 连接被拒。如果你改了端口或 host，记得同步 `dev.server.origin`。
 
-# 查看构建日志
-# 检查 .output/ 目录内容
-```
+### IndexedDB 查询报 `IDBKeyRange` / 查不到数据
 
-#### 2. IndexedDB 错误
+不要对可能为 `undefined` 的索引字段使用 `where().equals()`，改用 `filter()`。索引定义见 `src/lib/auxDatabase.ts`。
 
-**问题:** IDBKeyRange 错误
+### `defineBackground`、`import.meta.env` 找不到类型
 
-**解决:**
-- 确保使用 `filter()` 而不是 `where().equals()` 查询可能为 undefined 的字段
-- 参考数据库schema: `src/lib/database.ts`
+`.wxt/` 目录未生成，跑一次 `pnpm wxt prepare`（`pnpm install` 的 postinstall 会自动执行）。
 
-#### 3. AI 分类失败
+### 改了 manifest / 权限没生效
 
-**问题:** DeepSeek API 调用失败
+重新 `pnpm build`（或重启 `pnpm dev`），然后在 `chrome://extensions` 点该扩展的刷新按钮。权限变更后浏览器可能会禁用扩展，需要手动重新启用。
 
-**解决:**
-```bash
-# 检查环境变量
-echo $VITE_DEEPSEEK_API_KEY
+### 样式不生效
 
-# 检查 API 密钥格式
-# 应该是: sk-xxxxxxxxxxxxxxxx
+确认 `tailwind.config.js` 的 `content` 覆盖到了你新增的目录，然后重新构建。`src/styles/globals.css` 是唯一的全局样式入口。
 
-# 查看日志
-logger.error('DeepSeek error', error);
-```
+## 相关文档
 
-#### 4. 样式不生效
-
-**问题:** Tailwind CSS 样式丢失
-
-**解决:**
-```bash
-# 重新构建样式
-pnpm build
-
-# 检查 tailwind.config.js
-# 确保内容路径正确
-```
-
-#### 5. 热重载不工作
-
-**问题:** 修改代码后扩展不自动重载
-
-**解决:**
-```bash
-# 重启开发服务器
-# 清理 .output 目录
-rm -rf .output
-pnpm dev
-```
-
-### 调试技巧
-
-#### 后台脚本调试
-
-1. 打开 `chrome://extensions`
-2. 找到扩展，点击"检查视图 service worker"
-3. 查看后台日志
-
-#### 弹出页面/选项页调试
-
-1. 右键点击扩展图标
-2. 选择"检查弹出内容"
-3. 使用 Chrome DevTools 调试
-
-#### 查看数据库
-
-1. 打开 DevTools
-2. 进入 Application 标签
-3. 左侧找到 IndexedDB
-4. 展开 SmartBookmarkDB
-
-### 性能优化
-
-#### 减少打包体积
-
-```bash
-# 分析打包大小
-npx wxt build --analyze
-```
-
-**优化建议:**
-- 移除未使用的依赖
-- 使用动态导入
-- 启用 Tree Shaking
-
-#### 优化 AI 调用
-
-```typescript
-// ✅ 批量处理
-await deepSeekAIService.batchClassify(bookmarks, {
-  batchSize: 10,
-  useCache: true,
-});
-
-// ❌ 逐个处理
-for (const bookmark of bookmarks) {
-  await deepSeekAIService.classifyBookmark(bookmark);
-}
-```
-
----
-
-## 📚 相关资源
-
-### 官方文档
-
-- [WXT 文档](https://wxt.dev)
-- [Chrome Extension 文档](https://developer.chrome.com/docs/extensions)
-- [React 文档](https://react.dev)
-- [Dexie.js 文档](https://dexie.org)
-- [DeepSeek API](https://platform.deepseek.com/api-docs)
-
-### 设计文档
-
-- [架构设计](../claudedocs/architecture_smart_bookmark_20250119.md)
-- [AI 整理器设计](../claudedocs/ai_organizer_design_20250119.md)
-
-### 工具
-
-- [TypeScript](https://www.typescriptlang.org)
-- [Vitest](https://vitest.dev)
-- [Tailwind CSS](https://tailwindcss.com)
-
----
-
-## 🤝 贡献
-
-欢迎贡献代码！请参考 [贡献指南](./CONTRIBUTING.md)。
-
-### Pull Request 流程
-
-1. Fork 项目
-2. 创建功能分支
-3. 编写代码和测试
-4. 确保 CI 通过
-5. 提交 PR
-
----
-
-## 📄 许可证
-
-MIT License
+- [架构设计](./architecture.md)
+- [API 参考](./api.md)
+- [文档索引](./README.md)
+- [项目 README](../README.md)

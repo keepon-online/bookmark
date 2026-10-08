@@ -36,6 +36,13 @@ pnpm build       # 构建
 pnpm zip         # 打包
 ```
 
+## 文档
+
+- [文档索引](./docs/README.md)
+- [架构设计](./docs/architecture.md)
+- [API 参考](./docs/api.md)
+- [开发指南](./docs/development.md)
+
 ## 项目结构
 
 ```

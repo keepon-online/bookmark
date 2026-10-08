@@ -1,234 +1,120 @@
-# 智能书签 - 项目总览
+# 智能书签 · 文档索引
 
-> AI 驱动的智能书签管理浏览器扩展
+> 浏览器书签增强扩展（Chrome MV3）· 当前版本 **0.6.0**（`package.json` 与 `wxt.config.ts` 的 `manifest.version`）
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](./package.json)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![WXT](https://img.shields.io/badge/WXT-0.20.13-purple.svg)](https://wxt.dev)
-
-## 📖 项目简介
-
-智能书签是一个基于 AI 的浏览器扩展，通过 DeepSeek 大语言模型提供智能书签管理功能。支持自动分类、标签推荐、语义搜索、跨设备同步等高级功能。
-
-### 核心特性
-
-- 🤖 **AI 智能分类** - 使用 DeepSeek API 自动分析和分类书签
-- 🏷️ **智能标签推荐** - 基于书签内容自动推荐相关标签
-- 🔍 **语义搜索** - 超越关键词匹配的智能搜索
-- 📁 **自动整理** - 一键智能整理杂乱的书签
-- ☁️ **云端同步** - 基于 Supabase 的跨设备数据同步
-- 🔗 **链接健康检查** - 定期检测失效链接
-- 📊 **数据统计** - 可视化书签使用情况
-
-## 🏗️ 项目结构
-
-```
-smart-bookmark/
-├── src/
-│   ├── components/        # React 组件
-│   │   ├── ai/           # AI 配置和标签组件
-│   │   ├── bookmark/     # 书签列表和卡片组件
-│   │   ├── organizer/    # 书签整理组件
-│   │   ├── stats/        # 数据统计组件
-│   │   ├── sync/         # 同步设置组件
-│   │   ├── ui/           # UI 基础组件
-│   │   └── ...
-│   ├── entrypoints/      # 扩展入口点
-│   │   ├── background/   # 后台脚本
-│   │   ├── options/      # 设置页面
-│   │   ├── popup/        # 弹出页面
-│   │   └── sidepanel/    # 侧边栏
-│   ├── hooks/            # React Hooks
-│   ├── lib/              # 工具库
-│   │   ├── logger.ts     # 统一日志工具
-│   │   ├── database.ts   # IndexedDB 数据库
-│   │   ├── algorithms.ts # 算法实现
-│   │   └── ...
-│   ├── services/         # 业务逻辑服务
-│   │   ├── aiService.ts           # AI 分类服务
-│   │   ├── deepseekAIService.ts   # DeepSeek API 集成
-│   │   ├── bookmarkService.ts     # 书签 CRUD
-│   │   ├── folderService.ts       # 文件夹管理
-│   │   ├── tagService.ts          # 标签管理
-│   │   ├── browserSyncService.ts  # 浏览器同步
-│   │   ├── syncService.ts         # 云端同步
-│   │   ├── organizerService.ts    # 书签整理
-│   │   ├── linkHealthService.ts   # 链接健康
-│   │   └── statsService.ts        # 数据统计
-│   ├── stores/           # 状态管理
-│   ├── styles/           # 样式文件
-│   └── types/            # TypeScript 类型定义
-├── public/               # 静态资源
-├── claudedocs/          # 设计文档
-├── tests/               # 测试文件
-└── docs/                # 项目文档
-```
-
-## 🛠️ 技术栈
-
-### 核心框架
-- **WXT** (v0.20.13) - WebExtension 开发框架
-- **React** (v18.3.1) - UI 框架
-- **TypeScript** (v5.6.3) - 类型安全
-
-### 状态管理 & 数据
-- **Zustand** (v4.5.5) - 轻量级状态管理
-- **Dexie** (v4.0.8) - IndexedDB 封装
-- **Supabase** (v2.45.4) - 云端数据库
-
-### UI 组件
-- **Tailwind CSS** (v3.4.14) - 样式框架
-- **Radix UI** - 无障碍 UI 组件
-- **Lucide React** - 图标库
-
-### AI & 算法
-- **DeepSeek API** - 大语言模型
-- **Fuse.js** (v7.0.0) - 模糊搜索
-
-### 开发工具
-- **Vitest** (v2.1.4) - 单元测试
-- **ESLint** (v9.14.0) - 代码检查
-
-## 📊 代码统计
-
-| 类别 | 数量 | 说明 |
-|------|------|------|
-| 组件 | 25+ | React UI 组件 |
-| 服务 | 12+ | 业务逻辑服务 |
-| 代码行数 | 5500+ | services 目录 |
-| 类型定义 | 50+ | TypeScript 类型 |
-| 入口点 | 4 | background, options, popup, sidepanel |
-
-## 🚀 快速开始
-
-### 安装依赖
-```bash
-pnpm install
-```
-
-### 开发模式
-```bash
-# Chrome
-pnpm dev
-
-# Firefox
-pnpm dev:firefox
-```
-
-### 构建
-```bash
-# Chrome
-pnpm build
-
-# Firefox
-pnpm build:firefox
-```
-
-### 打包
-```bash
-pnpm zip
-```
-
-## 📖 文档导航
-
-### 核心文档
-- [架构设计](./architecture.md) - 系统架构和设计模式
-- [API 文档](./api.md) - 服务 API 参考
-- [开发指南](./development.md) - 开发环境搭建和最佳实践
-- [部署指南](./deployment.md) - 构建和发布流程
-
-### 设计文档
-- [AI 整理器设计](../claudedocs/ai_organizer_design_20250119.md)
-- [设置页面设计](../claudedocs/settings_page_design_20250119.md)
-- [同步故障排除](../claudedocs/sync_troubleshooting_guide.md)
-
-### API 文档
-- [书签服务](./services/bookmark-service.md) - 书签管理 API
-- [AI 服务](./services/ai-service.md) - AI 分类 API
-- [同步服务](./services/sync-service.md) - 数据同步 API
-
-## 🔧 配置说明
-
-### 环境变量
-```bash
-# DeepSeek API (必需)
-VITE_DEEPSEEK_API_KEY=your_api_key
-VITE_DEEPSEEK_BASE_URL=https://api.deepseek.com
-
-# Supabase (可选,用于云端同步)
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-
-# 日志级别 (可选)
-VITE_LOG_LEVEL=debug|info|warn|error|none
-```
-
-### WXT 配置
-详见 [wxt.config.ts](../wxt.config.ts)
-
-## 🧪 测试
+本目录只保留**与当前代码一致**的现状文档。v0.5 时期的历史设计稿（自建书签库、Supabase 云同步、文件夹双向同步等）已在 v0.6 重构时删除，需要考古时从 git 历史取回：
 
 ```bash
-# 运行所有测试
-pnpm test
-
-# 测试 UI 模式
-pnpm test:ui
-
-# 覆盖率报告
-pnpm test:coverage
+git log --diff-filter=D --name-only -- claudedocs docs/design docs/test
+git show <commit>:claudedocs/architecture_smart_bookmark_20250119.md
 ```
 
-## 📝 开发规范
+## 📖 四份文档
 
-### 代码风格
-- 使用 TypeScript 严格模式
-- 遵循 ESLint 规则
-- 使用 Prettier 格式化代码
+| 文档 | 内容 | 什么时候看 |
+|---|---|---|
+| [项目 README](../README.md) | 功能特性、技术栈、快速开始 | 第一次接触项目 |
+| [架构设计](./architecture.md) | 数据源原则、分层、服务职责、v0.5 → v0.6 变更 | 要改数据层或服务边界 |
+| [API 参考](./api.md) | services / lib / stores 的导出签名与用法 | 要调用已有能力 |
+| [开发指南](./development.md) | 环境、代码约定、测试、构建发布、故障排查 | 要动手写代码 |
 
-### Git 提交规范
+## 项目一句话
+
+**`chrome.bookmarks` 是唯一数据源。** 书签的读、写、移动全部直连浏览器书签 API，跨设备同步交给 Chrome 账号自带能力；扩展自有的 IndexedDB（`SmartBookmarkAuxDB`）只存浏览器书签没有的增强元数据——标签、备注、收藏、访问次数、死链状态——按书签节点 id 关联，可随时导出、重建或丢弃。卸载扩展不丢任何书签，也不需要数据迁移。
+
+## 技术栈
+
+| 层 | 选型 |
+|---|---|
+| 扩展框架 | WXT 0.20（Manifest V3） |
+| 界面 | React 18 + TypeScript 5.6（strict）+ Tailwind CSS 3.4 + Radix UI + Lucide |
+| 状态管理 | Zustand 4（整树快照 + 视图状态） |
+| 数据 | `chrome.bookmarks`（唯一数据源）+ Dexie 4 / IndexedDB（增强元数据） |
+| 搜索 | Fuse.js 7 |
+| AI | 本地规则引擎（免配置，默认）+ DeepSeek API（可选，用户自带 key） |
+| 测试 | Vitest 2 + happy-dom + fake-indexeddb |
+
+## 目录结构
+
 ```
-feat: 新功能
-fix: 修复 bug
-docs: 文档更新
-style: 代码格式调整
-refactor: 重构
-test: 测试相关
-chore: 构建/工具链相关
+src/
+├── entrypoints/              # WXT 入口（每个目录一个扩展页面/脚本）
+│   ├── background/           # Service Worker：快捷键、右键菜单、消息、定时任务
+│   │   ├── setup/            #   commands / contextMenus / bookmarkListeners / alarms
+│   │   └── messages/         #   commandHandlers
+│   ├── popup/                # 工具栏弹窗（快速添加 / 编辑当前页）
+│   ├── sidepanel/            # 侧边栏主界面（浏览、搜索、批量操作）
+│   └── options/              # 设置页（Bookmarks / AI / Organizer / Health / Advanced …）
+├── components/               # React 组件
+│   ├── ai/  batch/  bookmark/  dashboard/  linkHealth/  organizer/  search/  ui/
+├── services/                 # 业务逻辑（见 docs/api.md）
+│   ├── browserBookmarksService.ts   # chrome.bookmarks 薄封装：树规范化、事件、CRUD、查重
+│   ├── aiService.ts                 # 本地规则分类引擎（免 API）
+│   ├── deepseekAIService.ts         # DeepSeek 分类、缓存、成本统计
+│   ├── organizerService.ts          # AI 整理：suggest（只读）→ apply（写入）
+│   ├── linkHealthService.ts         # 死链检查：并发、限流、进度、报告
+│   └── profileService.ts            # 书签档案：纯计算统计/域名/分类/趋势
+├── lib/                      # 基础设施
+│   ├── auxDatabase.ts        # Dexie 增强元数据库 + 孤儿清扫 + 导入导出
+│   ├── httpChecker.ts        # HTTP 检查器：错误分级、重试、软 404
+│   ├── deepseekClient.ts     # DeepSeek HTTP 客户端（含 SSE 流式解析）
+│   ├── messaging.ts          # 与 background 的类型化消息通道
+│   ├── logger.ts             # 统一日志（VITE_LOG_LEVEL 控制）
+│   └── utils.ts  urlAnalyzer.ts
+├── stores/                   # browserBookmarkStore / uiStore
+├── hooks/                    # useDebounce 等
+├── types/                    # 领域模型（bookmark / browserBookmarks / organizer / linkHealth / profile / ai / messages）
+├── styles/                   # 全局样式
+└── test/                     # Vitest 全局 setup（fake-indexeddb、chrome mock）
 ```
 
-### 日志规范
-```typescript
-import { createLogger } from '@/lib/logger';
+## 常用命令
 
-const logger = createLogger('ModuleName');
-logger.debug('调试信息');
-logger.info('普通信息');
-logger.warn('警告信息');
-logger.error('错误信息');
+```bash
+pnpm install        # 安装依赖（postinstall 自动执行 wxt prepare，生成 .wxt/ 类型）
+
+pnpm dev            # Chrome 开发模式（HMR）
+pnpm dev:firefox    # Firefox 开发模式
+pnpm build          # 生产构建 → .output/chrome-mv3
+pnpm build:firefox  # 生产构建 → .output/firefox-mv2
+pnpm zip            # 打包成可上传商店的 zip
+pnpm zip:firefox
+
+pnpm typecheck      # tsc --noEmit
+pnpm lint           # eslint
+pnpm test           # vitest（监听模式）
+pnpm test:ui        # vitest UI
+pnpm test:coverage  # 覆盖率（v8）
 ```
 
-## 🤝 贡献指南
+## 代码规模（截至本次文档整理）
 
-欢迎提交 Issue 和 Pull Request！
+| 范围 | 文件 | 总行数 |
+|---|---|---|
+| 全部 `src/` | 99 | 13962 |
+| 其中源码（不含测试） | 85 | 12292 |
+| 其中测试 | 9 | 1496 |
+| services | 7 | 2639 |
+| components | 35 | 5026 |
+| lib | 8 | 1358 |
+| entrypoints | 22 | 1819 |
+| types | 8 | 904 |
+| stores | 3 | 495 |
 
-### 开发流程
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'feat: Add AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
+测试：**8 个测试文件 / 48 个用例**（`typecheck`、`lint`、`test` 当前全绿）。
+构建产物：`.output/chrome-mv3` 约 575 KB（未压缩目录）。
 
-## 📄 许可证
+## 配置
 
-MIT License
+| 配置项 | 位置 | 说明 |
+|---|---|---|
+| DeepSeek API Key | 设置页 → AI 设置 → `chrome.storage.local.deepseekConfig` | **不走 `.env`，不进代码库**；本地规则引擎免配置，不填也能用 |
+| 日志级别 | `VITE_LOG_LEVEL`=`debug\|info\|warn\|error\|none` | 未设置时：开发 `debug`、生产 `error` |
+| 主机权限 | `optional_host_permissions`（`http://*/*`、`https://*/*`） | 死链检查首次运行时通过 `chrome.permissions.request` 申请；未授权时降级判定为"无法连接"而不是"死链" |
+| 开发服务器 | `wxt.config.ts` → `dev.server` | 显式绑定 `127.0.0.1:3000`，规避 Windows 下 `localhost` 只解析 IPv6 的问题 |
 
-## 👥 作者
+## 文档维护约定
 
-- [@keepon-online](https://github.com/keepon-online)
-
-## 🙏 致谢
-
-- [WXT](https://wxt.dev) - 强大的 WebExtension 开发框架
-- [DeepSeek](https://deepseek.com) - AI 模型支持
-- [Radix UI](https://www.radix-ui.com) - 优秀的 UI 组件库
+- 改了任何模块的导出 API → 同步更新 [api.md](./api.md)。
+- 改了数据源或服务边界 → 同步更新 [architecture.md](./architecture.md)。
+- **`docs/` 不放设计稿。** 设计过程、方案对比、调研笔记请放在提交信息或临时草稿里，不要沉淀成与代码脱节的长期文档——这正是 v0.6 之前那批文档变成负担的原因。
