@@ -185,6 +185,7 @@ export class OrganizerService {
 
   // 应用所选建议：移动直写 chrome.bookmarks，标签写 aux，记录历史
   async apply(suggestions: OrganizeSuggestion[]): Promise<ApplyResult> {
+    const startedAt = now();
     const result: ApplyResult = { applied: 0, moved: 0, tagged: 0, errors: [] };
     const changes: OrganizeChange[] = [];
     // 应用成功的建议：学习回流只认这些，抛错的不能沉淀成规则
@@ -269,17 +270,24 @@ export class OrganizerService {
     }
 
     if (result.applied > 0) {
+      const finishedAt = now();
+      // 新流程是"用户在预览里逐条勾选"，没有策略/阈值这类输入，因此这里记录的是
+      // 从本次实际执行推导出来的等价信息（不是用户输入，也不含未实现的能力）
       await auxDb.organizeHistory.add({
         id: generateId(),
-        timestamp: now(),
-        // 旧 OrganizeOptions 字段在新流程中的等价记录
+        timestamp: finishedAt,
         options: {
+          // 组织策略：新流程没有策略选项，固定记为 auto
           strategy: 'auto',
+          // 缺失的目标文件夹会自动创建，故恒为 true
           createNewFolders: true,
-          applyTags: true,
-          moveBookmarks: true,
+          applyTags: suggestions.some((suggestion) => suggestion.suggestedTags.length > 0),
+          moveBookmarks: suggestions.some((suggestion) => !!suggestion.suggestedFolderPath),
           removeDuplicates: false,
-          minConfidence: 0,
+          // 筛选发生在 suggest 阶段，这里记录本次实际应用的最低置信度
+          minConfidence: suggestions.length > 0
+            ? Math.min(...suggestions.map((suggestion) => suggestion.confidence))
+            : 0,
           archiveUncategorized: false,
           handleBroken: 'ignore',
         },
@@ -291,10 +299,11 @@ export class OrganizerService {
           tagged: result.tagged,
           duplicatesRemoved: 0,
           archived: 0,
+          // 未跟踪：ensureFolderPath 只回报目标 id，不回报是否新建
           foldersCreated: [],
           errors: result.errors,
-          duration: 0,
-          timestamp: now(),
+          duration: finishedAt - startedAt,
+          timestamp: finishedAt,
         },
         changes,
       });

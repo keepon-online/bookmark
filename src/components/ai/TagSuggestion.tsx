@@ -7,6 +7,9 @@ import { Badge } from '@/components/ui/Badge';
 import { cn, getUrlKey } from '@/lib/utils';
 import { aiService } from '@/services/aiService';
 import type { Bookmark, ClassificationResult } from '@/types';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('TagSuggestion');
 
 interface TagSuggestionProps {
   bookmark: Partial<Bookmark>;
@@ -58,7 +61,7 @@ export function TagSuggestion({
           setSelectedTags(new Set(newTags));
         }
       } catch (error) {
-        console.error('Classification failed:', error);
+        logger.error('Classification failed', error);
       } finally {
         setIsLoading(false);
         setHasClassified(true);

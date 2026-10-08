@@ -272,6 +272,15 @@ describe('organizerService v2', () => {
     const learned = backing.learnedDomainRules as Record<string, { folder: string }>;
     expect(learned['ai-news.example.com'].folder).toBe('技术/AI');
 
+    // 整理历史记录的是真实/可推导的值，而不是陈旧占位
+    const history = await auxDb.organizeHistory.toArray();
+    expect(history).toHaveLength(1);
+    expect(history[0].options.moveBookmarks).toBe(true);
+    expect(history[0].options.applyTags).toBe(true);
+    expect(history[0].options.minConfidence).toBeCloseTo(0.92);
+    expect(history[0].result.duration).toBeGreaterThanOrEqual(0);
+    expect(history[0].result.moved).toBe(1);
+
     // 第二轮：同域名直接走学习规则，不再调用 AI
     batchSpy.mockClear();
     const second = await organizerService.suggest(

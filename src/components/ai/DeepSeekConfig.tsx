@@ -16,6 +16,9 @@ import {
 } from 'lucide-react';
 import { deepSeekAIService } from '@/services';
 import type { DeepSeekConfig, CostStats } from '@/types';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('DeepSeekConfig');
 
 interface DeepSeekConfigProps {
   className?: string;
@@ -54,7 +57,7 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
         }
       }
     } catch (error) {
-      console.error('Failed to load DeepSeek config:', error);
+      logger.error('Failed to load DeepSeek config', error);
     }
   };
 
@@ -67,7 +70,7 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
       const cacheObj = cached.deepseekClassificationCache || {};
       setCacheSize(Object.keys(cacheObj).length);
     } catch (error) {
-      console.error('Failed to load stats:', error);
+      logger.error('Failed to load stats', error);
     }
   };
 
@@ -122,7 +125,7 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
       setCacheSize(0);
       alert('缓存已清空');
     } catch (error) {
-      console.error('Failed to clear cache:', error);
+      logger.error('Failed to clear cache', error);
       alert('清空缓存失败');
     }
   };

@@ -11,9 +11,12 @@ import { setupAlarms } from './setup/alarms';
 import { setupBookmarkListeners } from './setup/bookmarkListeners';
 import { setupCommands } from './setup/commands';
 import { setupContextMenu } from './setup/contextMenus';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('Background');
 
 export default defineBackground(() => {
-  console.log('[Background] Service Worker started');
+  logger.info('Service Worker started');
 
   // 将页面加入浏览器书签栏
   async function addBookmarkToBar(input: { url: string; title: string }): Promise<unknown> {
@@ -48,7 +51,7 @@ export default defineBackground(() => {
 
   // 初始化
   async function initialize() {
-    console.log('[Background] Initializing...');
+    logger.info('Initializing...');
     try {
       await auxDb.open();
       setupContextMenu({
@@ -70,16 +73,16 @@ export default defineBackground(() => {
         bookmarks: typeof chrome !== 'undefined' ? chrome.bookmarks : undefined,
         cleanOrphanMeta,
       });
-      console.log('[Background] Ready');
+      logger.info('Ready');
     } catch (error) {
-      console.error('[Background] Initialization failed:', error);
+      logger.error('Initialization failed', error);
     }
   }
 
   // 处理消息：仅保留后台专属能力（读取当前页面信息）
   onMessage(
     async (message: Message, _sender: chrome.runtime.MessageSender): Promise<MessageResponse> => {
-      console.log('[Background] Received message:', message.type);
+      logger.debug('Received message', message.type);
       if (message.type === 'GET_CURRENT_TAB') {
         const pageInfo = await getCurrentPageInfo();
         return {

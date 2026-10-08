@@ -65,7 +65,7 @@ logger.error('失败', error);
 
 级别由 `VITE_LOG_LEVEL` 控制，未设置时开发环境 `debug`、生产 `error`。
 
-> 现存代码里仍有 **20 处**直接调用 `console.error(`（集中在 `deepseekAIService` 8 处、AI 配置与死链面板等组件，以及后台初始化分支），历史遗留。**新代码请统一走 logger。**
+> 全仓库的日志已统一走 logger（`src/lib/logger.ts` 是唯一直接调用 `console` 的地方）。**新代码请沿用这个约定。**
 
 ### 6. 错误处理
 

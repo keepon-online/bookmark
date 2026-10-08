@@ -27,6 +27,9 @@ import {
   type ScanSettings,
 } from './ScanSettingsPanel';
 import { BrokenLinksPanel } from './BrokenLinksPanel';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('HealthReport');
 
 interface HealthReportProps {
   onCheckAll?: () => void;
@@ -75,7 +78,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
       await linkHealthService.resetCheckResults();
       await useBrowserBookmarkStore.getState().refresh();
     } catch (error) {
-      console.error('Reset check results failed:', error);
+      logger.error('Reset check results failed', error);
       return;
     }
     await runCheck({ ...toBatchCheckOptions(scanSettings), skipRecentHours: 0 });
@@ -99,7 +102,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
       await loadReport();
       onCheckAll?.();
     } catch (error) {
-      console.error('Check all failed:', error);
+      logger.error('Check all failed', error);
     } finally {
       setIsChecking(false);
       setProgress(null);

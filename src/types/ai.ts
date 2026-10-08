@@ -79,17 +79,6 @@ export type ContentType =
   | 'forum'
   | 'other';
 
-// 学习数据
-export interface LearningData {
-  bookmarkId: string;
-  url: string;
-  originalTags: string[];
-  originalFolder?: string;
-  userTags: string[];
-  userFolder?: string;
-  timestamp: number;
-}
-
 // 分类统计 - 从 stats.ts 导入完整定义
 // import type { ClassificationStats } from './stats';
 

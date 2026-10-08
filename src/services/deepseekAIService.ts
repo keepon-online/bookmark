@@ -232,7 +232,7 @@ export class DeepSeekAIService {
 
       return result;
     } catch (error) {
-      console.error('[DeepSeek] Classification failed:', error);
+      logger.error('Classification failed', error);
       // 回退到本地分类
       const localResult = await aiService.classifyBookmark(bookmark);
       return {
@@ -338,7 +338,7 @@ export class DeepSeekAIService {
         this.updateCostStats(response.usage.total_tokens, response.usage.total_tokens * TOKEN_PRICE);
 
       } catch (error) {
-        console.error('[DeepSeek] Batch classification failed:', error);
+        logger.error('Batch classification failed', error);
         // 回退到本地分类
         if (fallbackToLocal) {
           for (const { index, bookmark } of batch) {
@@ -461,7 +461,7 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
         method: 'llm' as const,
       }));
     } catch (error) {
-      console.error('[DeepSeek] Failed to parse batch response:', content);
+      logger.error('Failed to parse batch response', content);
       // 返回默认结果数组
       return Array(expectedCount).fill(null).map(() => this.getDefaultResult());
     }
@@ -511,7 +511,7 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
         method: 'llm',
       };
     } catch (error) {
-      console.error('[DeepSeek] Failed to parse response:', content);
+      logger.error('Failed to parse response', content);
       // 返回默认结果
       return {
         suggestedTags: [],
@@ -545,7 +545,7 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
         );
       }
     } catch (error) {
-      console.error('[DeepSeek] Failed to load cache:', error);
+      logger.error('Failed to load cache', error);
     }
   }
 
@@ -559,7 +559,7 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
         deepseekClassificationCache: cacheObj,
       });
     } catch (error) {
-      console.error('[DeepSeek] Failed to save cache:', error);
+      logger.error('Failed to save cache', error);
     }
   }
 
@@ -573,7 +573,7 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
         this.costStats = stats.deepseekCostStats;
       }
     } catch (error) {
-      console.error('[DeepSeek] Failed to load cost stats:', error);
+      logger.error('Failed to load cost stats', error);
     }
   }
 
@@ -586,7 +586,7 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
         deepseekCostStats: this.costStats,
       });
     } catch (error) {
-      console.error('[DeepSeek] Failed to save cost stats:', error);
+      logger.error('Failed to save cost stats', error);
     }
   }
 

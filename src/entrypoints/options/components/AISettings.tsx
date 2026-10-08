@@ -2,6 +2,9 @@
 
 import * as React from 'react';
 import { DeepSeekConfig, LearnedRulesPanel } from '@/components/ai';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('AISettings');
 
 export function AISettings() {
   const [Component, setComponent] = React.useState<typeof DeepSeekConfig | null>(null);
@@ -50,7 +53,7 @@ export function AISettings() {
     Component && React.createElement(Component, {
       className: '',
       onConfigChange: (config) => {
-        console.log('AI config changed:', config);
+        logger.debug('AI config changed', config);
       },
     }),
     React.createElement(LearnedRulesPanel, { className: '' })

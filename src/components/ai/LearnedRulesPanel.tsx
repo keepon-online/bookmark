@@ -13,6 +13,9 @@ import {
   type LearnedDomainRules,
 } from '@/lib/learnedRules';
 import { formatRelativeTime } from '@/lib/utils';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('LearnedRulesPanel');
 
 interface LearnedRulesPanelProps {
   className?: string;
@@ -28,7 +31,7 @@ export function LearnedRulesPanel({ className = '' }: LearnedRulesPanelProps) {
     try {
       setRules(await loadLearnedRules());
     } catch (error) {
-      console.error('Failed to load learned rules:', error);
+      logger.error('Failed to load learned rules', error);
     } finally {
       setIsLoading(false);
     }

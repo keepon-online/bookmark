@@ -11,6 +11,9 @@ import { linkHealthService, ensureHostPermissions } from '@/services/linkHealthS
 import type { ScanSettings } from './ScanSettingsPanel';
 import { toBatchCheckOptions } from './ScanSettingsPanel';
 import { cn, formatRelativeTime, getDomain } from '@/lib/utils';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('BrokenLinksPanel');
 
 interface BrokenLinksPanelProps {
   scanSettings: ScanSettings;
@@ -148,7 +151,7 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
       await refresh();
       setSelected(new Set());
     } catch (error) {
-      console.error('Recheck failed:', error);
+      logger.error('Recheck failed', error);
     } finally {
       setIsWorking(false);
     }
@@ -163,7 +166,7 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
       await refresh();
       setSelected(new Set());
     } catch (error) {
-      console.error('Mark healthy failed:', error);
+      logger.error('Mark healthy failed', error);
     } finally {
       setIsWorking(false);
     }

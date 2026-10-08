@@ -2,6 +2,9 @@
 
 import * as React from 'react';
 import { HealthReport } from '@/components/linkHealth';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('HealthSettings');
 
 export function HealthSettings() {
   const [Component, setComponent] = React.useState<typeof HealthReport | null>(null);
@@ -48,7 +51,7 @@ export function HealthSettings() {
   return React.createElement('div', { className: 'space-y-6' },
     React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 dark:text-gray-100' }, '链接健康'),
     Component && React.createElement(Component, {
-      onCheckAll: () => console.log('Health check completed')
+      onCheckAll: () => logger.debug('Health check completed')
     })
   );
 }

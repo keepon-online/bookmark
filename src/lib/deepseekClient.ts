@@ -1,9 +1,12 @@
 // DeepSeek API 客户端
 
 import { sleep } from './utils';
+import { createLogger } from './logger';
 
 // 重试的指数退避基数（毫秒）：500 / 1000 / 2000 ...
 const RETRY_BASE_DELAY_MS = 500;
+
+const logger = createLogger('DeepSeekClient');
 
 /**
  * DeepSeek API 配置
@@ -265,7 +268,7 @@ export class DeepSeekClient {
               const data = JSON.parse(trimmed.slice(6)) as ChatCompletionChunk;
               yield data;
             } catch (error) {
-              console.error('Failed to parse SSE data:', error);
+              logger.error('Failed to parse SSE data', error);
             }
           }
         }

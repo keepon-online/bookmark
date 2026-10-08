@@ -209,7 +209,6 @@ await service.loadTree();
 | 方法 | 签名 | 返回 | 语义 |
 |---|---|---|---|
 | `classifyBookmark` | `classifyBookmark(bookmark: Bookmark): Promise<ClassificationResult>` | 分类结果 | 先按 `priority` 降序匹配规则，命中即返回（`confidence: 0.85`、`method: 'rule'`、`matchedRuleId`）；未命中则走关键词 + 内容类型启发式 |
-| `learnFromUserCorrections` | `learnFromUserCorrections(input: { url: string; originalTags?: string[] }, userTags: string[], userFolder?: string): Promise<void>` | — | 把用户纠正追加到内存 `learningData`；源码中学习算法仍是 `TODO`，**不会改变分类结果**。注意写入的 `originalFolder` 取的是 `userFolder` 参数 |
 | `getRules` | `getRules(): ClassificationRule[]` | 规则**副本** | 浅拷贝数组，外部改数组不影响内部 |
 | `addRule` | `addRule(rule: ClassificationRule): void` | — | 追加一条规则 |
 | `updateRule` | `updateRule(ruleId: string, updates: Partial<ClassificationRule>): boolean` | 是否更新成功 | 按 `id` 查找后浅合并 |
@@ -728,9 +727,14 @@ export interface ApplyResult {
 - 每条都 `applied++`（无论是否真的产生变更）；**只有整条 try 块没抛错**的建议才
   进入 `appliedSuggestions`，供下面的学习回流使用。
 - `errors` 的文案为 `` `${node.title || node.url}: ${error.message}` ``。
-- `applied > 0` 时写一条 `organizeHistory`。注意历史里的 `options` / `result` 是
-  **新流程的等价占位记录**（如 `strategy: 'auto'`、`minConfidence: 0`、
-  `duration: 0`、`removeDuplicates: false`、`foldersCreated: []`），并非用户输入。
+- `applied > 0` 时写一条 `organizeHistory`。新流程没有"策略/阈值"这类输入，因此
+  `options` 记录的是**从本次执行推导出的等价信息**，不是用户输入：
+  `strategy` 固定 `'auto'`、`createNewFolders` 恒 `true`（缺的文件夹会自动建）、
+  `applyTags` / `moveBookmarks` 取自本次建议里是否真的含有标签/文件夹、
+  `minConfidence` 取本次应用建议中的最低置信度；`removeDuplicates` /
+  `archiveUncategorized` / `handleBroken` 是未实现的旧字段，固定为
+  `false` / `false` / `'ignore'`。`result.duration` 是真实耗时，
+  `result.foldersCreated` **未跟踪**（`ensureFolderPath` 只回报目标 id，不回报是否新建）。
 - **学习回流**：从 `appliedSuggestions` 里筛出同时满足
   `engine === 'deepseek'`、`confidence >= 0.8`（`LEARN_MIN_CONFIDENCE`）、
   `suggestedFolderPath` 非空的建议，按 `getDomain(url).toLowerCase()` 为键，
@@ -1204,7 +1208,7 @@ export class DeepSeekAPIError extends Error {
 | 方法 | 签名 | 返回 | 语义 |
 |---|---|---|---|
 | `chatCompletions` | `chatCompletions(params: ChatCompletionParams): Promise<ChatCompletionResponse>` | 完整响应 | `POST {baseURL}/chat/completions`。请求体固定 `stream: false`，`temperature ?? 0.7`、`max_tokens ?? 2000`、`top_p ?? 1.0` |
-| `streamChatCompletions` | `streamChatCompletions(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk>` | 异步生成器 | 请求体固定 `stream: true`；按 SSE 逐行解析，跳过空行与 `data: [DONE]`，只 yield `data: ` 前缀且能 `JSON.parse` 成功的块；解析失败的块只 `console.error` 后跳过。**注意：流式路径不经过重试包装** |
+| `streamChatCompletions` | `streamChatCompletions(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk>` | 异步生成器 | 请求体固定 `stream: true`；按 SSE 逐行解析，跳过空行与 `data: [DONE]`，只 yield `data: ` 前缀且能 `JSON.parse` 成功的块；解析失败的块只 `logger.error` 后跳过。**注意：流式路径不经过重试包装** |
 | `testConnection` | `testConnection(): Promise<boolean>` | 是否连通 | 用 `model: 'deepseek-chat'`、`max_tokens: 5` 发一句 `Hello`，返回 `!!response.choices?.[0]?.message?.content`；异常返回 `false` |
 
 `request<T>(endpoint, options)` 为 `private`。错误处理：非 2xx 时读取响应体并抛
@@ -1223,7 +1227,9 @@ export function createDeepSeekClient(config: DeepSeekConfig): DeepSeekClient;
 
 ```ts
 import { createDeepSeekClient, DeepSeekAPIError } from '@/lib/deepseekClient';
+import { createLogger } from '@/lib/logger';
 
+const logger = createLogger('MyModule');
 const client = createDeepSeekClient({
   apiKey: 'sk-xxxx',
   baseURL: 'https://api.deepseek.com/v1',
@@ -1243,7 +1249,7 @@ try {
   console.log(response.choices[0]?.message.content, response.usage.total_tokens);
 } catch (error) {
   if (error instanceof DeepSeekAPIError) {
-    console.error(error.message, error.statusCode);
+    logger.error(error.message, error.statusCode);
   }
 }
 
@@ -1616,7 +1622,7 @@ applyTheme('light', 'rose' as PrimaryColor);
 | `bookmark.ts` | `export *` | `BookmarkStatus`、`BookmarkMeta`、`Bookmark`（`Bookmark` 含**必填字段 `urlKey: string`**，即 `getUrlKey(url)` 的标准化去重键） |
 | `browserBookmarks.ts` | `export *` | `BrowserBookmarkNode`、`BrowserTreeNode`、`BrowserTreeSnapshot`、`AuxBookmarkMeta`、`DuplicateRetentionStrategy`、`BrowserDuplicateGroup`、`BrowserBookmarkFilter` |
 | `messages.ts` | `export *` | `MessageType`（仅 `'GET_CURRENT_TAB'`）、`MessagePayloadMap`、`MessagePayload`、`Message`、`MessageResponse` |
-| `ai.ts` | `export *` | `ClassificationMethod`、`ClassificationResult`、`UrlInfo`、`ClassificationRule`、`RuleCondition`、`RuleAction`、`ContentType`、`LearningData`、`DeepSeekConfig`、`LLMClassificationResult`、`PromptTemplate`、`ClassificationCache`、`BatchClassifyOptions`、`CostStats` |
+| `ai.ts` | `export *` | `ClassificationMethod`、`ClassificationResult`、`UrlInfo`、`ClassificationRule`、`RuleCondition`、`RuleAction`、`ContentType`、`DeepSeekConfig`、`LLMClassificationResult`、`PromptTemplate`、`ClassificationCache`、`BatchClassifyOptions`、`CostStats` |
 | `linkHealth.ts` | `export *` | `LinkStatus`、`LinkCheckResult`、`LinkHealthReport`、`BatchCheckOptions`、`CheckProgress`（源码末尾注明：链接历史记录已由 aux 库 `LinkCheckRecord` 承担） |
 | `organizer.ts` | `export *` | `OrganizeStrategy`、`OrganizeOptions`、`OrganizeChange`、`OrganizeResult`、`DuplicateGroup`、`OrganizeHistory` |
 | `profile.ts` | **逐个导出**指定符号 + 2 个常量 | 类型：`BookmarkProfile`、`BookmarkCategory`、`CategoryConfig`、`CollectorLevel`、`CollectorLevelConfig`、`DomainStats`（在 `@/types` 里以别名 **`ProfileDomainStats`** 导出，避免与旧统计类型冲突）、`TrendDataPoint`；常量：`COLLECTOR_LEVELS`、`CATEGORY_CONFIGS` |

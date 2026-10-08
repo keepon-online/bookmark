@@ -5,6 +5,9 @@ import { Settings, Info } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
 import type { BatchCheckOptions } from '@/types/linkHealth';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('ScanSettings');
 
 // 扫描设置
 export interface ScanSettings {
@@ -35,7 +38,7 @@ export async function loadScanSettings(): Promise<ScanSettings> {
       return { ...DEFAULT_SCAN_SETTINGS, ...result[STORAGE_KEY] };
     }
   } catch (e) {
-    console.error('[ScanSettings] Failed to load:', e);
+    logger.error('Failed to load', e);
   }
   return DEFAULT_SCAN_SETTINGS;
 }
@@ -45,7 +48,7 @@ export async function saveScanSettings(settings: ScanSettings): Promise<void> {
   try {
     await chrome.storage.local.set({ [STORAGE_KEY]: settings });
   } catch (e) {
-    console.error('[ScanSettings] Failed to save:', e);
+    logger.error('Failed to save', e);
   }
 }
 

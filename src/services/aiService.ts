@@ -7,7 +7,6 @@ import type {
   ClassificationResult,
   ClassificationRule,
   ContentType,
-  LearningData,
 } from '@/types';
 
 // 默认分类规则
@@ -336,7 +335,6 @@ const DEFAULT_RULES: ClassificationRule[] = [
 
 export class AIService {
   private rules: ClassificationRule[] = DEFAULT_RULES;
-  private learningData: LearningData[] = [];
 
   /**
    * 分类单个书签
@@ -602,30 +600,6 @@ export class AIService {
       default:
         return false;
     }
-  }
-
-  /**
-   * 从用户反馈中学习
-   */
-  async learnFromUserCorrections(
-    input: { url: string; originalTags?: string[] },
-    userTags: string[],
-    userFolder?: string
-  ): Promise<void> {
-    const learningData: LearningData = {
-      bookmarkId: '',
-      url: input.url,
-      originalTags: input.originalTags ?? [],
-      originalFolder: userFolder,
-      userTags,
-      userFolder,
-      timestamp: Date.now(),
-    };
-
-    this.learningData.push(learningData);
-
-    // 简单学习：如果用户多次使用相同标签，可以创建新规则
-    // TODO: 实现更复杂的学习算法
   }
 
   /**
