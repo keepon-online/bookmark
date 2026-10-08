@@ -64,21 +64,57 @@ export interface ReconcileResult {
   removed: number;
   // 仍在等待认领的条数
   pending: number;
+  // 与"同链接、已有自己元数据"的节点合并掉的条数
+  merged: number;
+}
+
+/**
+ * 同一链接出现多份元数据时的合并规则（目标节点自己的那份为准，取并集不丢信息）：
+ * 标签去重合并、收藏取或、访问次数相加、最近访问取较晚的；
+ * 备注优先保留目标节点上的（用户在新节点写过就以他为准）；
+ * 死链状态取"检查时间较新"的那份。
+ */
+export function mergeMeta(target: AuxBookmarkMeta, orphan: AuxBookmarkMeta): AuxBookmarkMeta {
+  const recipient = (target.linkCheckedAt ?? 0) >= (orphan.linkCheckedAt ?? 0) ? target : orphan;
+  const lastVisited = Math.max(target.lastVisited ?? 0, orphan.lastVisited ?? 0);
+  return {
+    ...target,
+    tags: [...new Set([...target.tags, ...orphan.tags])],
+    notes: target.notes ?? orphan.notes,
+    isFavorite: target.isFavorite || orphan.isFavorite,
+    visitCount: target.visitCount + orphan.visitCount,
+    lastVisited: lastVisited > 0 ? lastVisited : undefined,
+    linkStatus: recipient.linkStatus,
+    linkCheckedAt: recipient.linkCheckedAt,
+    lastStatusCode: recipient.lastStatusCode,
+    lastErrorMessage: recipient.lastErrorMessage,
+    lastResponseTime: recipient.lastResponseTime,
+    linkStatusManual: target.linkStatusManual || orphan.linkStatusManual,
+    aiGenerated: target.aiGenerated || orphan.aiGenerated,
+    orphanedAt: undefined,
+  };
 }
 
 /**
  * 元数据对账：把 aux 里的元数据与当前书签树对齐。
  *
  * 1. 书签还在 → 补齐缺失的 `urlKey`
- * 2. 书签没了但已有元数据对应到新节点（urlKey 相同且该节点还没有元数据）→ 认领
- * 3. 书签没了、暂时无人认领 → 打上 `orphanedAt` 保留等待
- * 4. 超过 `ORPHAN_META_TTL_MS` 仍无人认领，或是没有 urlKey 的旧数据 → 清理
+ * 2. 书签没了、但有 urlKey 相同且**还没有元数据**的新节点 → 认领（bookmarkId 换成新 id）
+ * 3. 书签没了、同链接节点**已有自己的元数据** → 与该节点合并（见 `mergeMeta`）
+ * 4. 暂时无人认领 → 打上 `orphanedAt` 保留等待
+ * 5. 超过 `ORPHAN_META_TTL_MS` 仍无人认领，或是没有 urlKey 的旧数据 → 清理
  */
 export async function reconcileMeta(
   bookmarks: BrowserBookmarkNode[],
   nowTs: number = Date.now()
 ): Promise<ReconcileResult> {
-  const result: ReconcileResult = { rebound: 0, backfilled: 0, removed: 0, pending: 0 };
+  const result: ReconcileResult = {
+    rebound: 0,
+    backfilled: 0,
+    removed: 0,
+    pending: 0,
+    merged: 0,
+  };
   const all = await auxDb.bookmarkMeta.toArray();
   if (all.length === 0) {
     return result;
@@ -89,6 +125,15 @@ export async function reconcileMeta(
   for (const bookmark of bookmarks) {
     if (bookmark.url) {
       urlKeyById.set(bookmark.id, getUrlKey(bookmark.url));
+    }
+  }
+
+  // 仍在树上的元数据按 urlKey 建索引，供第 3 步合并用
+  const liveMetaByUrlKey = new Map<string, AuxBookmarkMeta>();
+  for (const meta of all) {
+    const liveUrlKey = urlKeyById.get(meta.bookmarkId);
+    if (liveUrlKey && !liveMetaByUrlKey.has(liveUrlKey)) {
+      liveMetaByUrlKey.set(liveUrlKey, meta);
     }
   }
 
@@ -118,7 +163,7 @@ export async function reconcileMeta(
       continue;
     }
 
-    // 2) 孤儿：有 urlKey 才有认领的可能
+    // 2) 孤儿：有 urlKey 才有认领/合并的可能
     if (meta.urlKey) {
       const target = claimable.get(meta.urlKey)?.shift();
       if (target) {
@@ -128,7 +173,19 @@ export async function reconcileMeta(
         continue;
       }
 
-      // 3) 还没人认领：打时间戳等待，超时才清理
+      // 3) 同链接的节点已有自己的元数据：合并而不是丢弃
+      const existing = liveMetaByUrlKey.get(meta.urlKey);
+      if (existing) {
+        const merged = mergeMeta(existing, meta);
+        puts.push(merged);
+        deletes.push(meta.bookmarkId);
+        // 同一 urlKey 的后续孤儿继续并进这份结果
+        liveMetaByUrlKey.set(meta.urlKey, merged);
+        result.merged++;
+        continue;
+      }
+
+      // 4) 还没人认领：打时间戳等待，超时才清理
       const orphanedAt = meta.orphanedAt ?? nowTs;
       if (nowTs - orphanedAt > ORPHAN_META_TTL_MS) {
         deletes.push(meta.bookmarkId);
@@ -142,7 +199,7 @@ export async function reconcileMeta(
       continue;
     }
 
-    // 4) 旧数据没有 urlKey，无从认领
+    // 5) 旧数据没有 urlKey，无从认领
     deletes.push(meta.bookmarkId);
     result.removed++;
   }

@@ -92,19 +92,19 @@ pnpm verify         # typecheck + lint + test:run + build 一条龙
 
 | 范围 | 文件 | 总行数 |
 |---|---|---|
-| 全部 `src/` | 106 | 15476 |
-| 其中源码（`*.ts` / `*.tsx`，不含测试） | 87 | 12939 |
-| 其中测试（12 个 `*.test.ts` + `src/test/setup.ts`） | 13 | 2353 |
+| 全部 `src/` | 106 | 15610 |
+| 其中源码（`*.ts` / `*.tsx`，不含测试） | 87 | 13016 |
+| 其中测试（12 个 `*.test.ts` + `src/test/setup.ts`） | 13 | 2410 |
 | services | 8 | 2996 |
-| components | 36 | 5287 |
-| lib | 10 | 1572 |
+| components | 36 | 5307 |
+| lib | 10 | 1629 |
 | entrypoints | 22 | 1880 |
 | types | 8 | 715 |
 | stores | 3 | 489 |
 
 > 统计口径：总行数含空行、按 LF 计数，不含 `node_modules`、`.output`、`.wxt`。本表是快照，改动代码后请顺手更新。
 
-测试：**12 个测试文件 / 82 个用例**（`typecheck`、`lint`、`test` 当前全绿）。注意 `src/test/setup.ts` 只提供 chrome mock 与手写的 indexedDB 桩，**用到 Dexie 的测试必须在文件顶部自行 `import 'fake-indexeddb/auto'`**。
+测试：**12 个测试文件 / 83 个用例**（`typecheck`、`lint`、`test` 当前全绿）。注意 `src/test/setup.ts` 只提供 chrome mock 与手写的 indexedDB 桩，**用到 Dexie 的测试必须在文件顶部自行 `import 'fake-indexeddb/auto'`**。
 构建产物：`.output/chrome-mv3` 共 17 个文件 / 649 KB（未压缩目录，`pnpm build` 实测）。
 
 ## 配置

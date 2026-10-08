@@ -968,7 +968,8 @@ const key = profileService.urlKeyOf('https://www.example.com/a/');
 | `class AuxDatabase extends Dexie` | `constructor()` | 构造时即 `super('SmartBookmarkAuxDB')` 并注册 v1 schema |
 | 单例 `auxDb` | `new AuxDatabase()` | 直接可用的实例 |
 | `defaultMeta` | `defaultMeta(bookmarkId: string): AuxBookmarkMeta` | 返回 `{ bookmarkId, tags: [], isFavorite: false, visitCount: 0 }` |
-| `reconcileMeta` | `reconcileMeta(bookmarks: BrowserBookmarkNode[], nowTs = Date.now()): Promise<ReconcileResult>` | **元数据对账**（取代旧版 sweepOrphanMeta，后者已删除）：①书签还在 → 补齐缺失的 `urlKey`；②书签没了但某新节点 `urlKey` 相同且该节点还没有元数据 → **认领**（`bookmarkId` 换成新 id）；③暂时无人认领 → 写入 `orphanedAt` 等待；④超过 `ORPHAN_META_TTL_MS`（90 天）或没有 `urlKey` 的旧数据 → 清理。返回 `{ rebound, backfilled, removed, pending }` |
+| `reconcileMeta` | `reconcileMeta(bookmarks: BrowserBookmarkNode[], nowTs = Date.now()): Promise<ReconcileResult>` | **元数据对账**（取代旧版 sweepOrphanMeta，后者已删除）：①书签还在 → 补齐缺失的 `urlKey`；②书签没了但某新节点 `urlKey` 相同且该节点还没有元数据 → **认领**（`bookmarkId` 换成新 id）；③书签没了但同链接节点**已有自己的元数据** → 用 `mergeMeta` **合并**；④暂时无人认领 → 写入 `orphanedAt` 等待；⑤超过 `ORPHAN_META_TTL_MS`（90 天）或没有 `urlKey` 的旧数据 → 清理。返回 `{ rebound, backfilled, merged, removed, pending }` |
+| `mergeMeta` | `mergeMeta(target: AuxBookmarkMeta, orphan: AuxBookmarkMeta): AuxBookmarkMeta` | 同一链接两份元数据的合并规则：标签并集去重、收藏取或、`visitCount` 相加、`lastVisited` 取较晚、备注优先 `target` 的、死链状态取 `linkCheckedAt` 较新的那份、`aiGenerated`/`linkStatusManual` 取或 |
 | `ORPHAN_META_TTL_MS` | `90 * 24 * 3600_000` | 孤儿元数据等待被认领的时长 |
 | `interface AuxExportData` | 见下 | 导出/导入的数据包 |
 | `exportAuxData` | `exportAuxData(): Promise<AuxExportData>` | 并行导出三张表全部数据 + `chrome.storage.local` 里的学习规则，固定 `version: 1`、`exportedAt: Date.now()` |
@@ -1766,7 +1767,7 @@ export interface BatchCheckOptions {
 | `@/services/organizerService` | `organizerService` | `OrganizerService`（无构造参数） | `isDeepSeekEnabled` |
 | `@/services/profileService` | `profileService` | `ProfileService`（无构造参数） | `ProfileService.urlKeyOf` |
 | `@/services/linkHealthAutoScan` | — | — | `runAutoScanTick`、`syncAutoScanAlarm`、`ensureAutoScanAlarm`、`AUTO_SCAN_ALARM`、`AUTO_SCAN_CONTINUE_ALARM`、`AUTO_SCAN_PROGRESS_KEY`、`AUTO_SCAN_BATCH_SIZE`、`AUTO_SCAN_STALE_MS`、`AUTO_SCAN_MIN_INTERVAL_HOURS` |
-| `@/lib/auxDatabase` | `auxDb` | `AuxDatabase extends Dexie` | `defaultMeta`、`reconcileMeta`、`ORPHAN_META_TTL_MS`、`exportAuxData`、`importAuxData` |
+| `@/lib/auxDatabase` | `auxDb` | `AuxDatabase extends Dexie` | `defaultMeta`、`reconcileMeta`、`mergeMeta`、`ORPHAN_META_TTL_MS`、`exportAuxData`、`importAuxData` |
 | `@/lib/learnedRules` | — | — | `loadLearnedRules`、`saveLearnedRules`、`clearLearnedRules`、`trimLearnedRules`、`lookupLearnedRule`、`matchLearnedRule`、`LEARNED_RULES_KEY`、`LEARNED_RULES_MAX`、`LEARNED_RULE_CONFIDENCE` |
 | `@/lib/httpChecker` | `httpChecker` | `HttpChecker`（无构造参数） | — |
 | `@/lib/scanSettings` | — | — | `loadScanSettings`、`saveScanSettings`、`toBatchCheckOptions`、`DEFAULT_SCAN_SETTINGS`、`SCAN_SETTINGS_KEY` |

@@ -24,7 +24,7 @@ describe('reconcileMeta', () => {
 
     const result = await reconcileMeta([node('1', 'https://example.com/a')]);
 
-    expect(result).toEqual({ rebound: 0, backfilled: 1, removed: 0, pending: 0 });
+    expect(result).toEqual({ rebound: 0, backfilled: 1, removed: 0, pending: 0, merged: 0 });
     const row = await auxDb.bookmarkMeta.get('1');
     expect(row?.urlKey).toBe(getUrlKey('https://example.com/a'));
     expect(row?.tags).toEqual(['前端']);
@@ -55,14 +55,14 @@ describe('reconcileMeta', () => {
 
     const first = await reconcileMeta([], nowTs);
 
-    expect(first).toEqual({ rebound: 0, backfilled: 0, removed: 0, pending: 1 });
+    expect(first).toEqual({ rebound: 0, backfilled: 0, removed: 0, pending: 1, merged: 0 });
     const row = await auxDb.bookmarkMeta.get('gone');
     expect(row?.orphanedAt).toBe(nowTs);
     expect(row?.tags).toEqual(['X']);
 
     // 距 TTL 还差 1 毫秒 → 仍然保留
     const second = await reconcileMeta([], nowTs + ORPHAN_META_TTL_MS - 1);
-    expect(second).toEqual({ rebound: 0, backfilled: 0, removed: 0, pending: 1 });
+    expect(second).toEqual({ rebound: 0, backfilled: 0, removed: 0, pending: 1, merged: 0 });
     expect(await auxDb.bookmarkMeta.get('gone')).toBeDefined();
   });
 
@@ -88,17 +88,73 @@ describe('reconcileMeta', () => {
     expect(await auxDb.bookmarkMeta.get('new')).toBeUndefined();
   });
 
-  it('已有元数据的书签不会被另一个同链接孤儿覆盖', async () => {
-    await auxDb.bookmarkMeta.put(meta('new', { tags: ['新'] }));
-    await auxDb.bookmarkMeta.put(meta('old', { urlKey: getUrlKey('https://example.com/a'), tags: ['旧'] }));
+  it('同链接节点已有元数据时合并：取并集而不是覆盖或丢弃', async () => {
+    await auxDb.bookmarkMeta.put(
+      meta('new', {
+        tags: ['新标签'],
+        notes: '新节点上的备注',
+        isFavorite: false,
+        visitCount: 2,
+        linkStatus: 'active',
+        linkCheckedAt: 500,
+        lastResponseTime: 120,
+      })
+    );
+    await auxDb.bookmarkMeta.put(
+      meta('old', {
+        urlKey: getUrlKey('https://example.com/a'),
+        tags: ['旧标签', '新标签'],
+        notes: '旧节点上的备注',
+        isFavorite: true,
+        visitCount: 3,
+        aiGenerated: true,
+        lastVisited: 9_000,
+        linkStatus: 'broken',
+        linkCheckedAt: 100,
+        lastStatusCode: 404,
+      })
+    );
 
     const result = await reconcileMeta([node('new', 'https://example.com/a')], 1_000_000);
 
-    // new 已有自己的元数据 → 不参与认领；old 继续等待
-    expect(result.rebound).toBe(0);
-    expect(result.pending).toBe(1);
-    expect((await auxDb.bookmarkMeta.get('new'))?.tags).toEqual(['新']);
-    expect((await auxDb.bookmarkMeta.get('old'))?.tags).toEqual(['旧']);
+    expect(result).toMatchObject({ rebound: 0, merged: 1, pending: 0 });
+    // 孤儿行被并掉
+    expect(await auxDb.bookmarkMeta.get('old')).toBeUndefined();
+
+    const merged = await auxDb.bookmarkMeta.get('new');
+    // 标签取并集且去重
+    expect(merged?.tags).toEqual(['新标签', '旧标签']);
+    // 备注以目标节点自己的为准（用户在新节点写过）
+    expect(merged?.notes).toBe('新节点上的备注');
+    // 收藏取或、访问次数相加、最近访问取较晚
+    expect(merged?.isFavorite).toBe(true);
+    expect(merged?.visitCount).toBe(5);
+    expect(merged?.lastVisited).toBe(9_000);
+    // 死链状态取检查时间较新的那份（新节点 linkCheckedAt=500）
+    expect(merged?.linkStatus).toBe('active');
+    expect(merged?.lastStatusCode).toBeUndefined();
+    expect(merged?.lastResponseTime).toBe(120);
+    // aiGenerated 取或
+    expect(merged?.aiGenerated).toBe(true);
+    expect(merged?.orphanedAt).toBeUndefined();
+  });
+
+  it('同一 urlKey 的多个孤儿依次并进同一份元数据', async () => {
+    await auxDb.bookmarkMeta.put(meta('new', { tags: ['保留'], visitCount: 1 }));
+    await auxDb.bookmarkMeta.put(
+      meta('o1', { urlKey: getUrlKey('https://example.com/a'), tags: ['A'], visitCount: 2 })
+    );
+    await auxDb.bookmarkMeta.put(
+      meta('o2', { urlKey: getUrlKey('https://example.com/a'), tags: ['B'], visitCount: 4 })
+    );
+
+    const result = await reconcileMeta([node('new', 'https://example.com/a')], 1_000_000);
+
+    expect(result).toMatchObject({ merged: 2, removed: 0, pending: 0 });
+    const merged = await auxDb.bookmarkMeta.get('new');
+    expect([...(merged?.tags ?? [])].sort()).toEqual(['A', 'B', '保留']);
+    expect(merged?.visitCount).toBe(7);
+    expect(await auxDb.bookmarkMeta.count()).toBe(1);
   });
 
   it('空库直接返回零计数', async () => {
@@ -107,6 +163,7 @@ describe('reconcileMeta', () => {
       backfilled: 0,
       removed: 0,
       pending: 0,
+      merged: 0,
     });
   });
 });
