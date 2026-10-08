@@ -90,20 +90,20 @@ pnpm test:coverage  # 覆盖率（v8）
 
 | 范围 | 文件 | 总行数 |
 |---|---|---|
-| 全部 `src/` | 98 | 14135 |
-| 其中源码（`*.ts` / `*.tsx`，不含测试） | 83 | 12253 |
-| 其中测试（8 个 `*.test.ts` + `src/test/setup.ts`） | 9 | 1698 |
-| services | 7 | 2839 |
-| components | 35 | 5085 |
-| lib | 8 | 1268 |
-| entrypoints | 22 | 1839 |
-| types | 8 | 726 |
+| 全部 `src/` | 102 | 14568 |
+| 其中源码（`*.ts` / `*.tsx`，不含测试） | 85 | 12474 |
+| 其中测试（10 个 `*.test.ts` + `src/test/setup.ts`） | 11 | 1910 |
+| services | 7 | 2775 |
+| components | 36 | 5238 |
+| lib | 9 | 1404 |
+| entrypoints | 22 | 1840 |
+| types | 8 | 721 |
 | stores | 3 | 496 |
 
-> 统计口径：总行数含空行，不含 `node_modules`、`.output`、`.wxt`。本表是快照，改动代码后请顺手更新。
+> 统计口径：总行数含空行、按 LF 计数，不含 `node_modules`、`.output`、`.wxt`。本表是快照，改动代码后请顺手更新。
 
-测试：**8 个测试文件 / 53 个用例**（`typecheck`、`lint`、`test` 当前全绿）。注意 `src/test/setup.ts` 只提供 chrome mock 与手写的 indexedDB 桩，**用到 Dexie 的测试必须在文件顶部自行 `import 'fake-indexeddb/auto'`**。
-构建产物：`.output/chrome-mv3` 共 17 个文件 / 626 KB（未压缩目录，`pnpm build` 实测）。
+测试：**10 个测试文件 / 63 个用例**（`typecheck`、`lint`、`test` 当前全绿）。注意 `src/test/setup.ts` 只提供 chrome mock 与手写的 indexedDB 桩，**用到 Dexie 的测试必须在文件顶部自行 `import 'fake-indexeddb/auto'`**。
+构建产物：`.output/chrome-mv3` 共 17 个文件 / 633 KB（未压缩目录，`pnpm build` 实测）。
 
 ## 配置
 

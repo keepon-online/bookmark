@@ -5,6 +5,12 @@
 
 import { browserBookmarks } from './browserBookmarksService';
 import { auxDb, defaultMeta } from '@/lib/auxDatabase';
+import {
+  loadLearnedRules,
+  saveLearnedRules,
+  matchLearnedRule,
+  trimLearnedRules,
+} from '@/lib/learnedRules';
 import { aiService } from './aiService';
 import { deepSeekAIService } from './deepseekAIService';
 import { generateId, getDomain, getUrlKey, now } from '@/lib/utils';
@@ -37,65 +43,9 @@ export interface SuggestOptions {
   folderPaths?: string[];
 }
 
-// 用户确认应用过的 AI 结果固化为域名级规则：
-// 下次同域名书签直接走规则，不再消耗 AI 调用
-interface LearnedDomainRule {
-  folder: string;
-  tags: string[];
-  learnedAt: number;
-}
-
-type LearnedDomainRules = Record<string, LearnedDomainRule>;
-
-const LEARNED_RULES_KEY = 'learnedDomainRules';
-const LEARNED_RULES_MAX = 200;
-// 学习回流门槛：AI 建议 + 该置信度以上 + 用户应用，才值得固化
+// 学习回流门槛：AI 建议 + 该置信度以上 + 用户成功应用，才值得固化。
+// 规则的存取、匹配与容量控制见 @/lib/learnedRules
 const LEARN_MIN_CONFIDENCE = 0.8;
-
-async function loadLearnedDomainRules(): Promise<LearnedDomainRules> {
-  try {
-    const stored = await chrome.storage.local.get(LEARNED_RULES_KEY);
-    return (stored?.[LEARNED_RULES_KEY] as LearnedDomainRules) ?? {};
-  } catch {
-    return {};
-  }
-}
-
-async function saveLearnedDomainRules(rules: LearnedDomainRules): Promise<void> {
-  try {
-    await chrome.storage.local.set({ [LEARNED_RULES_KEY]: rules });
-  } catch {
-    // 存储失败不影响整理主流程
-  }
-}
-
-// 命中学习规则 → 规则结果（带 matchedRuleId，使其不再送 AI）
-function matchLearnedRule(rules: LearnedDomainRules, url: string): ClassificationResult | null {
-  const domain = getDomain(url).toLowerCase();
-  const hit = domain ? rules[domain] : undefined;
-  if (!hit) {
-    return null;
-  }
-  return {
-    suggestedFolder: hit.folder,
-    suggestedTags: hit.tags,
-    contentType: 'other',
-    confidence: 0.9,
-    method: 'rule',
-    matchedRuleId: `learned:${domain}`,
-  };
-}
-
-// 容量控制：超限时按学习时间淘汰最旧的
-function trimLearnedRules(rules: LearnedDomainRules): LearnedDomainRules {
-  const entries = Object.entries(rules);
-  if (entries.length <= LEARNED_RULES_MAX) {
-    return rules;
-  }
-  return Object.fromEntries(
-    entries.sort((a, b) => b[1].learnedAt - a[1].learnedAt).slice(0, LEARNED_RULES_MAX)
-  );
-}
 
 export interface ApplyResult {
   applied: number;
@@ -153,7 +103,7 @@ export class OrganizerService {
 
     // 规则先行（免费、确定、含用户确认过的学习规则）；
     // AI 只处理规则未覆盖的长尾，规则命中的部分质量更稳且零成本
-    const learnedRules = await loadLearnedDomainRules();
+    const learnedRules = await loadLearnedRules();
     const results: ClassificationResult[] = await Promise.all(
       inputs.map(async (input) => {
         const learned = matchLearnedRule(learnedRules, input.url);
@@ -305,7 +255,7 @@ export class OrganizerService {
         !!suggestion.suggestedFolderPath
     );
     if (learnable.length > 0) {
-      const learned = await loadLearnedDomainRules();
+      const learned = await loadLearnedRules();
       for (const suggestion of learnable) {
         const domain = getDomain(suggestion.node.url ?? '').toLowerCase();
         if (!domain) continue;
@@ -315,7 +265,7 @@ export class OrganizerService {
           learnedAt: now(),
         };
       }
-      await saveLearnedDomainRules(trimLearnedRules(learned));
+      await saveLearnedRules(trimLearnedRules(learned));
     }
 
     if (result.applied > 0) {

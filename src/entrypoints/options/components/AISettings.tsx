@@ -1,7 +1,7 @@
 // AI 设置页面
 
 import * as React from 'react';
-import { DeepSeekConfig } from '@/components/ai';
+import { DeepSeekConfig, LearnedRulesPanel } from '@/components/ai';
 
 export function AISettings() {
   const [Component, setComponent] = React.useState<typeof DeepSeekConfig | null>(null);
@@ -52,6 +52,7 @@ export function AISettings() {
       onConfigChange: (config) => {
         console.log('AI config changed:', config);
       },
-    })
+    }),
+    React.createElement(LearnedRulesPanel, { className: '' })
   );
 }

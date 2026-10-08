@@ -688,7 +688,8 @@ export interface ApplyResult {
 1. `targets = nodes.filter((node) => node.url)`——只处理有 URL 的节点，再逐个
    `toClassifierInput(node, meta[node.id])` 适配成分类器输入 `inputs`。
 2. **规则先行（免费、确定、含学到的规则）**：先读
-   `chrome.storage.local.learnedDomainRules`（`loadLearnedDomainRules`），然后
+   `chrome.storage.local.learnedDomainRules`（`loadLearnedRules`，实现见
+   [`@/lib/learnedRules`](#学习规则liblearnedrules)），然后
    `Promise.all` 逐条并发判定：`matchLearnedRule(rules, url)` 命中（按
    `getDomain(url).toLowerCase()` 查表）就返回学习结果（`confidence: 0.9`、
    `matchedRuleId: 'learned:<domain>'`），未命中的才跑本地规则引擎
@@ -733,11 +734,13 @@ export interface ApplyResult {
 - **学习回流**：从 `appliedSuggestions` 里筛出同时满足
   `engine === 'deepseek'`、`confidence >= 0.8`（`LEARN_MIN_CONFIDENCE`）、
   `suggestedFolderPath` 非空的建议，按 `getDomain(url).toLowerCase()` 为键，
-  把 `{ folder, tags, learnedAt: now() }` 写进
+  把 `{ folder, tags, learnedAt: now() }` 经 `saveLearnedRules` 写进
   `chrome.storage.local.learnedDomainRules`（下次 `suggest` 的同域名书签会直接命中
   学习规则，不再消耗 AI 调用）。总容量 **200**（`LEARNED_RULES_MAX`），超出时按
   `learnedAt` 淘汰最旧的。⚠️ **只有应用成功的建议才会回流**：移动或写标签抛错的
   那些不写入规则，避免把失败的结果沉淀成偏好。
+  用户可在设置页 → AI 设置的「AI 学习规则」面板查看与清空（见
+  `LearnedRulesPanel`），导出 JSON 备份时也会带上这份数据。
 
 #### `rollback` 的行为
 
@@ -889,8 +892,8 @@ const key = profileService.urlKeyOf('https://www.example.com/a/');
 | `defaultMeta` | `defaultMeta(bookmarkId: string): AuxBookmarkMeta` | 返回 `{ bookmarkId, tags: [], isFavorite: false, visitCount: 0 }` |
 | `sweepOrphanMeta` | `sweepOrphanMeta(validIds: Set<string>): Promise<number>` | **孤儿元数据清扫**：读出全部 `bookmarkMeta`，删掉 `bookmarkId` 不在 `validIds` 中的记录，返回删除条数。0 条时不发删除请求 |
 | `interface AuxExportData` | 见下 | 导出/导入的数据包 |
-| `exportAuxData` | `exportAuxData(): Promise<AuxExportData>` | 并行导出三张表全部数据，固定 `version: 1`、`exportedAt: Date.now()` |
-| `importAuxData` | `importAuxData(data: AuxExportData): Promise<void>` | 合并写入（`bulkPut`，**不覆盖未涉及的记录**）。`data.version !== 1` 时抛 `Error('Unsupported aux data version')` |
+| `exportAuxData` | `exportAuxData(): Promise<AuxExportData>` | 并行导出三张表全部数据 + `chrome.storage.local` 里的学习规则，固定 `version: 1`、`exportedAt: Date.now()` |
+| `importAuxData` | `importAuxData(data: AuxExportData): Promise<void>` | 三张表 `bulkPut` 合并写入（**不覆盖未涉及的记录**）；学习规则按 key 合并、**导入方优先**。`data.version !== 1` 时抛 `Error('Unsupported aux data version')` |
 
 ```ts
 export interface LinkCheckRecord {
@@ -910,6 +913,8 @@ export interface AuxExportData {
   bookmarkMeta: AuxBookmarkMeta[];
   linkChecks: LinkCheckRecord[];
   organizeHistory: OrganizeHistory[];
+  // AI 整理的学习规则（存在 chrome.storage.local，不属于 aux 库，但同属扩展自有数据）
+  learnedDomainRules?: LearnedDomainRules;
 }
 ```
 
@@ -941,6 +946,45 @@ const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json
 const parsed = JSON.parse(await file.text()) as AuxExportData;
 await importAuxData(parsed); // 合并写入
 ```
+
+#### 学习规则：`@/lib/learnedRules`
+
+AI 整理的"学习回流"数据存在 `chrome.storage.local`（不属于 Dexie 库），
+单独放在这个模块里，供 `organizerService`、备份导出与设置页共用。
+**未收录进 `@/lib` 聚合导出**。
+
+```ts
+export interface LearnedDomainRule {
+  folder: string;
+  tags: string[];
+  learnedAt: number;
+}
+export type LearnedDomainRules = Record<string, LearnedDomainRule>; // key = 域名（小写）
+
+export const LEARNED_RULES_KEY = 'learnedDomainRules';
+export const LEARNED_RULES_MAX = 200;
+export const LEARNED_RULE_CONFIDENCE = 0.9;
+
+export function loadLearnedRules(): Promise<LearnedDomainRules>;
+export function saveLearnedRules(rules: LearnedDomainRules): Promise<void>;
+export function clearLearnedRules(): Promise<void>;
+export function trimLearnedRules(rules: LearnedDomainRules): LearnedDomainRules;
+export function lookupLearnedRule(rules: LearnedDomainRules, url: string): LearnedDomainRule | undefined;
+export function matchLearnedRule(rules: LearnedDomainRules, url: string): ClassificationResult | null;
+```
+
+| 函数 | 语义 |
+|---|---|
+| `loadLearnedRules` | 读 `chrome.storage.local[LEARNED_RULES_KEY]`；storage 抛错时**降级为空对象**，不向上抛 |
+| `saveLearnedRules` / `clearLearnedRules` | 整体覆写 / 删除该 key；失败静默（不影响整理主流程） |
+| `trimLearnedRules` | 超过 `LEARNED_RULES_MAX` 时按 `learnedAt` 保留最新 200 条；未超限时**返回原引用** |
+| `lookupLearnedRule` | 用 `getDomain(url).toLowerCase()` 查规则；空域名返回 `undefined` |
+| `matchLearnedRule` | 命中则返回 `ClassificationResult`（`confidence: 0.9`、`method: 'rule'`、`matchedRuleId: 'learned:<域名>'`，因此**不会再送 AI**）；未命中返回 `null` |
+
+**已知取舍**：粒度是整个域名，同一域名的多用途书签会共用一条规则；学错时只能靠
+设置页「AI 学习规则」面板查看与清空（或下一次学习覆盖）。之所以不做"域名 + 内容类型"
+的细粒度：本地 `inferContentType` 主要依据 URL 与域名，同一域名通常只映射到同一个
+类型，细化收益很小却会明显降低命中率。
 
 ---
 
@@ -1639,6 +1683,7 @@ export interface BatchCheckOptions {
 | `@/services/organizerService` | `organizerService` | `OrganizerService`（无构造参数） | `isDeepSeekEnabled` |
 | `@/services/profileService` | `profileService` | `ProfileService`（无构造参数） | `ProfileService.urlKeyOf` |
 | `@/lib/auxDatabase` | `auxDb` | `AuxDatabase extends Dexie` | `defaultMeta`、`sweepOrphanMeta`、`exportAuxData`、`importAuxData` |
+| `@/lib/learnedRules` | — | — | `loadLearnedRules`、`saveLearnedRules`、`clearLearnedRules`、`trimLearnedRules`、`lookupLearnedRule`、`matchLearnedRule`、`LEARNED_RULES_KEY`、`LEARNED_RULES_MAX`、`LEARNED_RULE_CONFIDENCE` |
 | `@/lib/httpChecker` | `httpChecker` | `HttpChecker`（无构造参数） | — |
 | `@/lib/deepseekClient` | — | `DeepSeekClient`（构造参数 `DeepSeekConfig`） | `createDeepSeekClient` |
 | `@/lib/urlAnalyzer` | `urlAnalyzer` | `UrlAnalyzer`（无构造参数） | — |

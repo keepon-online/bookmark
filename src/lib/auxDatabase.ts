@@ -5,6 +5,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { AuxBookmarkMeta } from '@/types';
 import type { OrganizeHistory } from '@/types/organizer';
+import { loadLearnedRules, saveLearnedRules, type LearnedDomainRules } from './learnedRules';
 
 // 死链检查记录
 export interface LinkCheckRecord {
@@ -66,19 +67,30 @@ export interface AuxExportData {
   bookmarkMeta: AuxBookmarkMeta[];
   linkChecks: LinkCheckRecord[];
   organizeHistory: OrganizeHistory[];
+  // AI 整理的学习规则存在 chrome.storage.local（不属于 aux 库），但同属
+  // "扩展自有数据"，一并备份，避免换机或重装后学习成果丢失
+  learnedDomainRules?: LearnedDomainRules;
 }
 
 // 导出全部元数据（JSON 备份用）
 export async function exportAuxData(): Promise<AuxExportData> {
-  const [bookmarkMeta, linkChecks, organizeHistory] = await Promise.all([
+  const [bookmarkMeta, linkChecks, organizeHistory, learnedDomainRules] = await Promise.all([
     auxDb.bookmarkMeta.toArray(),
     auxDb.linkChecks.toArray(),
     auxDb.organizeHistory.toArray(),
+    loadLearnedRules(),
   ]);
-  return { version: 1, exportedAt: Date.now(), bookmarkMeta, linkChecks, organizeHistory };
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    bookmarkMeta,
+    linkChecks,
+    organizeHistory,
+    learnedDomainRules,
+  };
 }
 
-// 导入元数据（合并写入，不覆盖未涉及的记录）
+// 导入元数据（合并写入，不覆盖未涉及的记录；学习规则按 key 合并，导入方优先）
 export async function importAuxData(data: AuxExportData): Promise<void> {
   if (data.version !== 1) {
     throw new Error('Unsupported aux data version');
@@ -91,5 +103,9 @@ export async function importAuxData(data: AuxExportData): Promise<void> {
   }
   if (data.organizeHistory?.length) {
     await auxDb.organizeHistory.bulkPut(data.organizeHistory);
+  }
+  if (data.learnedDomainRules && Object.keys(data.learnedDomainRules).length > 0) {
+    const current = await loadLearnedRules();
+    await saveLearnedRules({ ...current, ...data.learnedDomainRules });
   }
 }

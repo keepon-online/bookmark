@@ -3,3 +3,4 @@
 export * from './DeepSeekConfig';
 export * from './ContentTypeBadge';
 export * from './TagSuggestion';
+export * from './LearnedRulesPanel';
