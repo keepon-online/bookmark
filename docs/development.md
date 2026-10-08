@@ -65,7 +65,7 @@ logger.error('失败', error);
 
 级别由 `VITE_LOG_LEVEL` 控制，未设置时开发环境 `debug`、生产 `error`。
 
-> 现存代码里仍有约 20 处直接调用 `console.error`（集中在初始化与网络分支），历史遗留。**新代码请统一走 logger。**
+> 现存代码里仍有 **20 处**直接调用 `console.error(`（集中在 `deepseekAIService` 8 处、AI 配置与死链面板等组件，以及后台初始化分支），历史遗留。**新代码请统一走 logger。**
 
 ### 6. 错误处理
 
@@ -82,7 +82,7 @@ pnpm test:coverage   # v8 覆盖率
 
 配置在 `vitest.config.ts`：环境 `happy-dom`，全局 setup 为 `src/test/setup.ts`，别名 `@` → `src`。
 
-现状：**8 个测试文件 / 48 个用例**，覆盖 `browserBookmarksService`、`organizerService`、`profileService`、`linkHealthService`、`httpChecker`、`auxDatabase` 与两个 store；`aiService`（规则引擎）、`deepseekAIService`、UI 组件尚无测试，欢迎补。
+现状：**8 个测试文件 / 53 个用例**。按文件分布：`regressions.test.ts`（19 例，死链判定、并发队列、`httpChecker`、aux 相关回归）、`browserBookmarksService`(6)、`organizerService`(9)、`browserBookmarkStore`(6)、`setup`(4)、`commandHandlers`(3)、`uiStore`(3)、`profileService`(3)。`aiService`（规则引擎）、`deepseekAIService`、UI 组件尚无测试，欢迎补。
 
 三条实践约定：
 

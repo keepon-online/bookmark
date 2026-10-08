@@ -24,13 +24,14 @@ browserBookmarksService          ← 树加载/规范化/事件订阅/CRUD 透�
 browserBookmarkStore (Zustand)   ← 整树快照 + 视图状态，事件去抖 150ms 重载
         │
         ├── useBookmarkFilter    ← 文件夹闭包 + 快速过滤 + Fuse.js 搜索
-        │
+        │                          （索引与查询分离：击键只 fuse.search，不重建索引）
 UI: popup / sidepanel / options
         │
 SmartBookmarkAuxDB (Dexie)       ← 增强元数据，按书签节点 id 关联
   - bookmarkMeta:    tags[] / notes / isFavorite / visitCount / lastVisited /
                      linkStatus / linkCheckedAt / lastStatusCode /
-                     lastErrorMessage / linkStatusManual / aiGenerated
+                     lastErrorMessage / lastResponseTime / linkStatusManual /
+                     aiGenerated
   - linkChecks:      死链检查历史
   - organizeHistory: AI 整理历史
 ```
@@ -45,7 +46,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 |---|---|---|
 | `chrome.bookmarks` | 书签与文件夹树、创建时间、顺序 | 权威数据，绝不可丢 |
 | `SmartBookmarkAuxDB`（IndexedDB / Dexie） | `bookmarkMeta`（标签、备注、收藏、访问次数、死链状态）、`linkChecks`（检查历史）、`organizeHistory`（整理历史） | 可随时重建；丢失只影响增强体验 |
-| `chrome.storage.local` | `deepseekConfig`（API Key、模型、开关）、`deepseekClassificationCache`、`deepseekCostStats`、死链检查设置 | 配置类，可重设 |
+| `chrome.storage.local` | `deepseekConfig`（API Key、模型、开关）、`deepseekClassificationCache`、`deepseekCostStats`、`learnedDomainRules`（AI 整理回流得到的域名级规则，上限 200，按学习时间淘汰）、死链检查设置 | 配置类，可重设 |
 
 ### 状态层
 
@@ -57,7 +58,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 | 服务 | 职责 | 数据来源 |
 |---|---|---|
 | `browserBookmarksService` | `chrome.bookmarks` 薄封装：树规范化、事件订阅、CRUD 透传、按路径确保文件夹、按 urlKey 重复分组、空文件夹检测 | chrome.bookmarks |
-| `organizerService` | AI 整理：`suggest`（只读建议）/ `apply`（确认后执行）/ 历史记录 | 树快照 + chrome.bookmarks + aux |
+| `organizerService` | AI 整理：`suggest`（只读建议，规则与学习规则先行、仅长尾交 AI）/ `apply`（确认后执行，并把成功应用的高置信度 AI 结果回流为域名规则）/ 历史记录 | 树快照 + chrome.bookmarks + aux + chrome.storage |
 | `linkHealthService` | 死链检查：批次并发、同域自适应限流、进度/停止、健康报告、人工标记豁免 | 树快照 + aux + httpChecker |
 | `profileService` | 书签档案：纯同步计算（统计、域名分布、分类画像、趋势、组织度评分、收藏家等级） | 树快照 + aux |
 | `aiService` | 本地规则分类引擎（零配置、离线，默认方案） | 无 |
@@ -82,7 +83,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 
 **书签变更同步**：任何来源（扩展自身、用户在浏览器里操作、Chrome 账号同步）改动书签 → `chrome.bookmarks` 事件 → store 去抖 150ms → 整树重载 → 顺带清扫孤儿元数据。可靠性优先于增量更新，`getTree()` 是毫秒级的。
 
-**AI 整理**：`organizerService.suggest()` 只读生成建议（配置了 DeepSeek 就优先用它，失败自动回退本地规则引擎）→ 用户在预览里勾选、微调 → `apply()` 逐条写 `chrome.bookmarks`（移动）与 aux（标签）→ 记录到 `organizeHistory`，支持撤销。
+**AI 整理**：`organizerService.suggest()` 只读生成建议，**规则先行**——先套用已学习的域名规则与本地规则引擎（免配置、零成本），只把规则未覆盖的长尾交给 DeepSeek，并把用户现有目录树注入提示词；AI 不可用时保留规则结果 → 用户在预览里勾选、微调 → `apply()` 逐条写 `chrome.bookmarks`（移动）与 aux（标签），把**应用成功的**高置信度 AI 建议固化为域名级学习规则 → 记录到 `organizeHistory`，支持撤销。
 
 **死链检查**：`ensureHostPermissions()`（用户手势中申请主机权限）→ 按域名分组、同域串行且间隔自适应（遇 429/503 翻倍退避）→ `httpChecker` 逐个检查并分级 → 结果写 `bookmarkMeta.linkStatus` 与 `linkChecks`。**网络层失败（无任何 HTTP 响应）不判死链**，只有拿到明确 HTTP 错误才标记失效；`linkStatusManual` 的人工标记优先于自动判定。
 
@@ -106,9 +107,10 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 
 ## 测试策略
 
-- 服务层单测：注入假 `chrome` API（`BookmarksApi` 等）+ `fake-indexeddb`（aux），覆盖树规范化、查重、空文件夹检测、整理建议/应用、死链判定与并发队列、档案计算。
+- 服务层单测：注入假 `chrome` API（`BookmarksApi` 等）+ `fake-indexeddb`（aux），覆盖树规范化、查重、空文件夹检测、整理建议/应用与学习回流、死链判定与并发队列、档案计算。
+- entrypoints 单测：后台消息处理与启动装配（`commandHandlers`、`setup`）。
 - store 单测：事件订阅、元数据联动清理、标签派生。
-- 现状：8 个测试文件 / 48 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
+- 现状：8 个测试文件 / 53 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
 - 每次提交前跑 `pnpm typecheck` / `pnpm lint` / `pnpm test -- --run` / `pnpm build`（仓库还没有 CI）。
 
 ## 相关文档

@@ -62,10 +62,9 @@ src/
 │   ├── logger.ts             # 统一日志（VITE_LOG_LEVEL 控制）
 │   └── utils.ts  urlAnalyzer.ts
 ├── stores/                   # browserBookmarkStore / uiStore
-├── hooks/                    # useDebounce 等
 ├── types/                    # 领域模型（bookmark / browserBookmarks / organizer / linkHealth / profile / ai / messages）
 ├── styles/                   # 全局样式
-└── test/                     # Vitest 全局 setup（fake-indexeddb、chrome mock）
+└── test/                     # Vitest 全局 setup（chrome mock + 手写 indexedDB 桩）
 ```
 
 ## 常用命令
@@ -91,18 +90,20 @@ pnpm test:coverage  # 覆盖率（v8）
 
 | 范围 | 文件 | 总行数 |
 |---|---|---|
-| 全部 `src/` | 99 | 13962 |
-| 其中源码（不含测试） | 85 | 12292 |
-| 其中测试 | 9 | 1496 |
-| services | 7 | 2639 |
-| components | 35 | 5026 |
-| lib | 8 | 1358 |
-| entrypoints | 22 | 1819 |
-| types | 8 | 904 |
-| stores | 3 | 495 |
+| 全部 `src/` | 98 | 14135 |
+| 其中源码（`*.ts` / `*.tsx`，不含测试） | 83 | 12253 |
+| 其中测试（8 个 `*.test.ts` + `src/test/setup.ts`） | 9 | 1698 |
+| services | 7 | 2839 |
+| components | 35 | 5085 |
+| lib | 8 | 1268 |
+| entrypoints | 22 | 1839 |
+| types | 8 | 726 |
+| stores | 3 | 496 |
 
-测试：**8 个测试文件 / 48 个用例**（`typecheck`、`lint`、`test` 当前全绿）。
-构建产物：`.output/chrome-mv3` 约 575 KB（未压缩目录）。
+> 统计口径：总行数含空行，不含 `node_modules`、`.output`、`.wxt`。本表是快照，改动代码后请顺手更新。
+
+测试：**8 个测试文件 / 53 个用例**（`typecheck`、`lint`、`test` 当前全绿）。注意 `src/test/setup.ts` 只提供 chrome mock 与手写的 indexedDB 桩，**用到 Dexie 的测试必须在文件顶部自行 `import 'fake-indexeddb/auto'`**。
+构建产物：`.output/chrome-mv3` 共 17 个文件 / 626 KB（未压缩目录，`pnpm build` 实测）。
 
 ## 配置
 

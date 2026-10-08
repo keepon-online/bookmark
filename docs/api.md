@@ -371,9 +371,10 @@ API Key 不存在 `.env`，而是由设置页写入 **`chrome.storage.local` 的
 | `getPromptTemplates` | `getPromptTemplates(): PromptTemplate[]` | 3 个模板 | 直接返回模块级模板数组（**非副本**） |
 
 `private`（不可外部调用）：`checkInitialized`、`buildBatchPrompt`、
-`getBatchSystemPrompt`、`parseBatchClassificationResponse`、`getDefaultResult`、
-`buildPrompt`、`parseClassificationResponse`、`getCacheKey`、`loadCache`、
-`saveCache`、`loadCostStats`、`saveCostStats`、`updateCostStats`、`delay`。
+`getBatchSystemPrompt`、`injectFolderTree`、`parseBatchClassificationResponse`、
+`getDefaultResult`、`buildPrompt`、`parseClassificationResponse`、`getCacheKey`、
+`loadCache`、`saveCache`、`loadCostStats`、`saveCostStats`、`updateCostStats`、
+`delay`。
 
 #### `classifyBookmark` 细节
 
@@ -391,10 +392,18 @@ API Key 不存在 `.env`，而是由设置页写入 **`chrome.storage.local` 的
 #### `batchClassify` 细节
 
 `BatchClassifyOptions` 的解构默认值为
-`{ batchSize = 20, onProgress, fallbackToLocal = true }`。
+`{ batchSize = 20, onProgress, fallbackToLocal = true, folderTree }`。
 
 - **`batchSize` 默认 20**，并被强制收敛到 **[10, 50]** 区间；被修正时通过
   `logger.warn` 记录。
+- **`folderTree` 是用户现有文件夹的完整路径**（如 `"开发/前端"`），只影响系统
+  提示词：每批都用 `getBatchSystemPrompt(folderTree)` 构建 system message，
+  它把基础提示词交给私有 `injectFolderTree(prompt, folderTree)`：对路径做归一化
+  （去掉开头的 `书签栏/`、`其他书签/` 前缀与尾部 `/`，再 `trim()`）、过滤空串、
+  去重、**最多展示 60 个**（超出时追加一句"文件夹较多，仅展示前 60 个"），并在
+  提示词末尾追加第 5 条规则"**优先使用用户现有文件夹**"（`suggestedFolder`
+  应优先映射到这些路径，确实都不合适时才建议新文件夹）。`folderTree` 为空时
+  提示词原样返回。
 - 先扫一遍缓存，命中项直接落到结果数组的**原位**，未命中项才进入批量请求；
   因此返回数组与入参**等长同序**。
 - 每批一次 `chatCompletions`：`temperature = config.temperature ?? 0.3`，
@@ -450,6 +459,7 @@ const tech = await deepSeekAIService.classifyBookmark(bookmark, 'tech-classify')
 const batch = await deepSeekAIService.batchClassify([bookmark], {
   batchSize: 20,
   fallbackToLocal: true,
+  folderTree: ['开发/前端', '学习/文章'],
   onProgress: (current, total) => console.log(`${current}/${total}`),
 });
 
@@ -507,9 +517,9 @@ if (await deepSeekAIService.testConnection()) {
 | `isCheckRunning` | `isCheckRunning(): boolean` | 是否运行中 | — |
 | `checkBookmarks` | `checkBookmarks(nodes: BrowserBookmarkNode[], options: BatchCheckOptions = {}, onProgress?: (progress: CheckProgress) => void): Promise<LinkCheckResult[]>` | 本次实际检查的结果 | 见下。**已在运行时抛** `Error('已有检查正在进行中，请先停止或等待完成')` |
 | `markAsHealthy` | `markAsHealthy(bookmarkIds: string[]): Promise<void>` | — | 人工标记为正常：写入 `linkStatus: 'active'` + `linkStatusManual: true`，后续自动扫描不再改判 |
-| `getHealthReport` | `getHealthReport(nodes: BrowserBookmarkNode[], meta: Record<string, AuxBookmarkMeta>): Promise<LinkHealthReport>` | 健康报告 | 基于**传入快照**统计 `active`/`broken`/`unreachable`，其余计入 `pending`；再查 `linkChecks` 里每个书签的最新一条记录算 `avgResponseTime` 与 `lastCheckedAt` |
+| `getHealthReport` | `getHealthReport(nodes: BrowserBookmarkNode[], meta: Record<string, AuxBookmarkMeta>): Promise<LinkHealthReport>` | 健康报告 | 基于**传入快照**统计 `active`/`broken`/`unreachable`，其余计入 `pending`；**零查询聚合**——不再查 `linkChecks` 表，`lastCheckedAt` 取已判定（`linkStatus` 为 `active`/`broken`/`unreachable`）记录中 `meta.linkCheckedAt` 的最大值，`avgResponseTime` 为这些记录 `meta.lastResponseTime` 的平均值（仅 `typeof === 'number' && > 0` 的样本计入，无样本时为 `0`） |
 | `getCheckHistory` | `getCheckHistory(bookmarkId: string, limit = 10): Promise<LinkCheckRecord[]>` | 历史记录 | 按 `checkedAt` 降序取前 `limit` 条 |
-| `resetCheckResults` | `resetCheckResults(): Promise<void>` | — | 清空 `linkChecks`，并把每条 `bookmarkMeta` **重写为只含** `bookmarkId/tags/notes/isFavorite/visitCount/lastVisited/aiGenerated`（即抹掉 `linkStatus`/`linkCheckedAt`/`lastStatusCode`/`lastErrorMessage`/`linkStatusManual`）。运行中抛 `Error('A check is running')` |
+| `resetCheckResults` | `resetCheckResults(): Promise<void>` | — | 清空 `linkChecks`，并把每条 `bookmarkMeta` **重写为只含** `bookmarkId/tags/notes/isFavorite/visitCount/lastVisited/aiGenerated`（即抹掉 `linkStatus`/`linkCheckedAt`/`lastStatusCode`/`lastErrorMessage`/`lastResponseTime`/`linkStatusManual`）。运行中抛 `Error('A check is running')` |
 | `cleanupOldRecords` | `cleanupOldRecords(daysToKeep = 30): Promise<number>` | 删除条数 | 以 `cutoff = now() - daysToKeep * 24 * 3600_000` 为界，删除 `checkedAt < cutoff` 的全部记录（Dexie `where('checkedAt').below(cutoff).delete()`） |
 
 #### `checkBookmarks` 的完整行为
@@ -554,7 +564,8 @@ if (await deepSeekAIService.testConnection()) {
 上一轮结果。
 
 **5）写库策略**：`base = meta ?? defaultMeta(bookmarkId)`，写
-`linkCheckedAt` / `lastStatusCode` / `lastErrorMessage`；仅在 `!keepStatus` 时写
+`linkCheckedAt` / `lastStatusCode` / `lastErrorMessage` / `lastResponseTime`
+（即 `check.responseTime`）；仅在 `!keepStatus` 时写
 `linkStatus`。**例外**：`networkError && errorKind === 'blocked'`（无主机权限导致的
 无效检查）**完全不写 meta**，也不占跳过窗口，授权后下次检查即可重新覆盖。
 
@@ -630,7 +641,7 @@ await linkHealthService.resetCheckResults();   // 清空检查结果（用于纠
 | 导出 | 类型 | 说明 |
 |---|---|---|
 | `interface OrganizeSuggestion` | 类型 | 单条建议，见下 |
-| `interface SuggestOptions` | 类型 | `minConfidence?` / `engine?` / `moveBookmarks?` / `applyTags?` |
+| `interface SuggestOptions` | 类型 | `minConfidence?` / `engine?` / `moveBookmarks?` / `applyTags?` / `folderPaths?` |
 | `interface ApplyResult` | 类型 | `{ applied, moved, tagged, errors }` |
 | `isDeepSeekEnabled` | `() => Promise<boolean>` | 读 `chrome.storage.local.deepseekConfig`，返回 `Boolean(config?.enabled && config?.apiKey)`；异常返回 `false` |
 | `class OrganizerService` | 类 | 见下 |
@@ -651,6 +662,7 @@ export interface SuggestOptions {
   engine?: 'auto' | 'rule'; // 默认 'auto'
   moveBookmarks?: boolean;  // 默认 true
   applyTags?: boolean;      // 默认 true
+  folderPaths?: string[];   // 用户现有文件夹完整路径（如 '开发/前端'），作为 AI 分类目标结构
 }
 
 export interface ApplyResult {
@@ -669,7 +681,7 @@ export interface ApplyResult {
 | 方法 | 签名 | 返回 | 语义 |
 |---|---|---|---|
 | `suggest` | `suggest(nodes: BrowserBookmarkNode[], meta: Record<string, AuxBookmarkMeta>, options: SuggestOptions = {}): Promise<OrganizeSuggestion[]>` | 建议列表 | **纯只读，不写任何数据**（除按需初始化 DeepSeek 服务外） |
-| `apply` | `apply(suggestions: OrganizeSuggestion[]): Promise<ApplyResult>` | 执行结果 | 移动直写 `chrome.bookmarks`，标签写 aux，记录 `organizeHistory` |
+| `apply` | `apply(suggestions: OrganizeSuggestion[]): Promise<ApplyResult>` | 执行结果 | 移动直写 `chrome.bookmarks`，标签写 aux，记录 `organizeHistory`；**应用成功**的高置信度 AI 建议还会按域名学习回流 |
 | `rollback` | `rollback(historyId: string): Promise<{ restored: number; errors: string[] }>` | 撤销结果 | 见下 |
 | `getHistory` | `getHistory(limit = 20): Promise<OrganizeHistory[]>` | 历史（新在前） | 按 `timestamp` 降序取前 `limit` 条 |
 | `deleteHistory` | `deleteHistory(historyId: string): Promise<void>` | — | 删一条 |
@@ -677,23 +689,33 @@ export interface ApplyResult {
 
 #### `suggest` 的行为
 
-1. `targets = nodes.filter((node) => node.url)`——只处理有 URL 的节点。
-2. **引擎选择**：
-   - `engine === 'auto'`（默认）**且** `await isDeepSeekEnabled()` 为真 → 读
-     `chrome.storage.local.deepseekConfig`，`deepSeekAIService.initialize(config)`
-     后 `batchClassify(inputs, { batchSize: 20 })`，`usedEngine = 'deepseek'`；
-     **抛错时 catch 回退** `aiService.batchClassify(inputs)`（此时 `usedEngine`
-     仍保持 `'rule'`）。
-   - 其余情况（`engine === 'rule'`，或 `auto` 但 DeepSeek 未启用）→
-     `aiService.batchClassify(inputs)`，`usedEngine = 'rule'`。
-3. 逐条过滤：`!result || result.confidence < minConfidence` 直接丢弃。
-4. `moveBookmarks` 为假时 `folder = undefined`；否则取 `result.suggestedFolder`。
+1. `targets = nodes.filter((node) => node.url)`——只处理有 URL 的节点，再逐个
+   `toClassifierInput(node, meta[node.id])` 适配成分类器输入 `inputs`。
+2. **规则先行（免费、确定、含学到的规则）**：先读
+   `chrome.storage.local.learnedDomainRules`（`loadLearnedDomainRules`），然后
+   `Promise.all` 逐条并发判定：`matchLearnedRule(rules, url)` 命中（按
+   `getDomain(url).toLowerCase()` 查表）就返回学习结果（`confidence: 0.9`、
+   `matchedRuleId: 'learned:<domain>'`），未命中的才跑本地规则引擎
+   `aiService.classifyBookmark(input)`。**不再调用 `aiService.batchClassify`**。
+3. **AI 只处理长尾**：`engine === 'auto'`（默认）**且**
+   `await isDeepSeekEnabled()` 为真时，取 `!results[i].matchedRuleId` 的下标
+   （即学习规则与内置规则都没命中的长尾），读
+   `chrome.storage.local.deepseekConfig` 并 `deepSeekAIService.initialize(config)`，
+   再 `deepSeekAIService.batchClassify(长尾 inputs, { batchSize: 20, folderTree: folderPaths })`；
+   返回结果逐条**原位覆盖** `results[i]` 并记入 `aiHandled`（该集合决定每条建议的
+   `engine`）。
+4. **AI 抛错时保留规则结果**：整段 `try/catch` 静默吞掉异常，已算出的规则结果
+   原样保留（不再整体回退成本地批量分类）。
+5. 逐条过滤：`!result || result.confidence < minConfidence` 直接丢弃。
+6. `moveBookmarks` 为假时 `folder = undefined`；否则取 `result.suggestedFolder`。
    若目标文件夹与书签**当前所在目录一致**（两侧都去掉开头的 `书签栏/`、`其他书签/`
    及尾部 `/` 并 `trim()` 后比较），则取消移动建议。
-5. `applyTags` 为假时 `tags = []`；否则用 `result.suggestedTags` 过滤掉
+7. `applyTags` 为假时 `tags = []`；否则用 `result.suggestedTags` 过滤掉
    `meta[node.id].tags` 中已有的标签。
-6. **既没有文件夹建议、也没有新标签时不产出建议**。
-7. `reason` 取 `'DeepSeek 分类'` 或 `'规则引擎匹配'`，`engine` 取 `usedEngine`。
+8. **既没有文件夹建议、也没有新标签时不产出建议**。
+9. `reason` 取 `'DeepSeek 分类'` 或 `'规则引擎匹配'`；`engine` 是**逐条判定**的
+   ——只有该条被 AI 接管（在 `aiHandled` 中）才是 `'deepseek'`，其余（学习规则
+   命中、内置规则命中、AI 未启用）都是 `'rule'`。
 
 #### `apply` 的行为
 
@@ -706,11 +728,20 @@ export interface ApplyResult {
   以 `tags: [...new Set([...base.tags, ...suggestedTags])]` 与 `aiGenerated: true`
   写回，`tagged++`。
 - 发生过移动或打标则追加一条 `OrganizeChange`（`type` 为 `'move'` 或 `'tag'`）。
-- 每条都 `applied++`（无论是否真的产生变更）。
+- 每条都 `applied++`（无论是否真的产生变更）；**只有整条 try 块没抛错**的建议才
+  进入 `appliedSuggestions`，供下面的学习回流使用。
 - `errors` 的文案为 `` `${node.title || node.url}: ${error.message}` ``。
 - `applied > 0` 时写一条 `organizeHistory`。注意历史里的 `options` / `result` 是
   **新流程的等价占位记录**（如 `strategy: 'auto'`、`minConfidence: 0`、
   `duration: 0`、`removeDuplicates: false`、`foldersCreated: []`），并非用户输入。
+- **学习回流**：从 `appliedSuggestions` 里筛出同时满足
+  `engine === 'deepseek'`、`confidence >= 0.8`（`LEARN_MIN_CONFIDENCE`）、
+  `suggestedFolderPath` 非空的建议，按 `getDomain(url).toLowerCase()` 为键，
+  把 `{ folder, tags, learnedAt: now() }` 写进
+  `chrome.storage.local.learnedDomainRules`（下次 `suggest` 的同域名书签会直接命中
+  学习规则，不再消耗 AI 调用）。总容量 **200**（`LEARNED_RULES_MAX`），超出时按
+  `learnedAt` 淘汰最旧的。⚠️ **只有应用成功的建议才会回流**：移动或写标签抛错的
+  那些不写入规则，避免把失败的结果沉淀成偏好。
 
 #### `rollback` 的行为
 
@@ -743,6 +774,7 @@ const suggestions: OrganizeSuggestion[] = await organizerService.suggest(bookmar
   engine: 'auto',
   moveBookmarks: true,
   applyTags: true,
+  folderPaths: ['开发/前端', '学习/文章'], // 注入现有文件夹结构给 AI
 });
 
 // 2) 用户勾选后执行（这里演示全选）
@@ -788,20 +820,22 @@ await organizerService.deleteHistory(history[0]?.id ?? '');
 |---|---|
 | `totalBookmarks` / `totalFolders` | `bookmarks.length` / `folders.length` |
 | `totalTags` | aux 中所有标签去重后的数量（仅统计有 meta 的书签） |
+| `folderedRate` | **严格口径**的入夹率（0-100 整数）：`node.path` 存在且**既不是** `'书签栏'` **也不是** `'其他书签'`（即真正放进了子文件夹）的书签占比；无书签时为 `0` |
+| `taggedRate` | 打标率（0-100 整数）：`meta.tags` 非空的书签占比 |
 | `collectionStartDate` / `collectionEndDate` | `dateAdded > 0` 的最小/最大值；无有效日期时为 `0` |
 | `collectionDays` | 仅当 `end > start` 时为 `ceil((end - start) / 86400_000)`，否则 `0` |
 | `averagePerMonth` | `round(totalBookmarks / max(collectionDays / 30, 1))` |
 | `uniqueDomains` | `getDomain(url)` 去重数量 |
-| `httpsRatio` | `url.startsWith('https')` 的数量 / `totalBookmarks` |
-| `topDomains` | 域名计数降序**取前 10**；每项含 `percentage = count / max(totalBookmarks, 1)`、`isHttps`（存在 `https://{domain}` 开头的书签）、`category` |
+| `httpsRatio` | `url.startsWith('https://')` 的数量 / `totalBookmarks`（无书签时为 `0`） |
+| `topDomains` | 域名计数降序**取前 10**；每项含 `percentage = count / max(totalBookmarks, 1)`、`isHttps`（该域名出现在 **https 域名集合**中，即存在 `https://` 且域名相同的书签）、`category`（`categorize(domain, '')`，即只按域名匹配） |
 | `domainDiversity` | 归一化 Shannon 熵：`entropy / log2(uniqueDomains)`，`uniqueDomains <= 1` 时为 `0` |
 | `categoryDistribution` | 每个 `CATEGORY_CONFIGS.id` 的计数（先全部置 0 再累加） |
 | `primaryCategory` | 计数最多的分类；最大值仍为 0 时取 `'other'` |
 | `yearlyTrend` / `monthlyTrend` | 按 `YYYY` / `YYYY-MM` 升序，每项 `{ period, count, cumulative }`（`cumulative` 为累计值） |
-| `duplicateCount` | `BrowserBookmarksService.groupDuplicates(bookmarks)`（默认 `'smart'` 策略）各组 `bookmarks.length - 1` 之和 |
+| `duplicateCount` | 单趟用 `urlKeyCounts` Map（按 `getUrlKey(url)` 分组）累加**各组多出的份数**（`count - 1`）之和；`ProfileService` **已不再 import `BrowserBookmarksService`**，也不再调用 `groupDuplicates`（与原实现结果等价） |
 | `brokenCount` | `meta.linkStatus` 为 `'broken'` 或 `'unreachable'` 的数量 |
 | `favoriteCount` / `aiGeneratedCount` | `meta.isFavorite` / `meta.aiGenerated` 为真的数量 |
-| `organizationScore` | `round(clamp(folderedRatio * 0.5 + taggedRatio * 0.5 - duplicatePenalty - brokenPenalty, 0, 1) * 100)`；`folderedRatio` 为有 `parentId` 且 `path` 非空的比例，`taggedRatio` 为标签非空的比例，两个惩罚项各自**上限 0.2** |
+| `organizationScore` | `round(max(0, min(1, 入夹率 * 0.5 + 打标率 * 0.5 - duplicatePenalty - brokenPenalty)) * 100)`。⚠️ **入夹率与 `folderedRate` 同源（严格口径）**，不再是"有 `parentId` 且 `path` 非空"的宽口径；`duplicatePenalty = min(duplicateCount / totalBookmarks, 0.2)`、`brokenPenalty = min(brokenCount / totalBookmarks, 0.2)`，两个惩罚项各自**上限 0.2** |
 | `collectorScore` | `round(totalBookmarks + uniqueDomains * 2 + totalTags * 3 + favoriteCount * 5)` |
 | `collectorLevel` / `collectorTitle` | 从 `COLLECTOR_LEVELS` **倒序**查找首个 `collectorScore >= minScore` 的等级，取 `level` 与 `title.zh` |
 | `archivedCount` | 恒为 `0`（v0.6 无归档概念） |
@@ -1193,34 +1227,30 @@ v0.6 起 UI 直连数据层，消息通道**只保留 `GET_CURRENT_TAB`**
 
 | 导出 | 签名 | 说明 |
 |---|---|---|
-| `sendMessage` | `sendMessage<TType extends MessageType, R = unknown>(type: TType, payload?: MessagePayload<TType>): Promise<R>` | 自动生成 `requestId = crypto.randomUUID()` 并 `chrome.runtime.sendMessage`。无响应抛 `Error('No response from background')`；`response.success === false` 抛 `Error(response.error \|\| 'Unknown error')`；成功返回 `response.data as R`。失败时先 `console.error` 再原样抛出 |
 | `onMessage` | `onMessage<TType extends MessageType = MessageType, R = unknown>(handler: (message: Message<TType>, sender: chrome.runtime.MessageSender) => Promise<MessageResponse<R>> \| MessageResponse<R>): void` | background 侧监听。用 `Promise.resolve(handler(...))` 包装并 `sendResponse`；handler 抛错时回 `{ success: false, error, requestId }`；**始终 `return true`**（保持消息端口开启以支持异步响应） |
 | `getCurrentTab` | `getCurrentTab(): Promise<chrome.tabs.Tab \| null>` | `chrome.tabs.query({ active: true, currentWindow: true })` 的第一项，没有则 `null` |
 | `getCurrentPageInfo` | `getCurrentPageInfo(): Promise<{ url: string; title: string; favicon?: string } \| null>` | 基于 `getCurrentTab()`；无 tab 或无 `tab.url` 返回 `null`；`title` 缺省回退为 `url`，`favicon` 取 `tab.favIconUrl` |
 
 > 相关类型来自 `@/types`：`MessageType`、`MessagePayloadMap`、`MessagePayload`、
 > `Message`、`MessageResponse`。
-> 当前代码库中 `sendMessage` **尚无生产调用方**（表单直接调用
-> `getCurrentPageInfo()`），它仍是消息通道的规范入口。
+> 发送侧没有导出函数：UI（如表单）直接调用 `getCurrentPageInfo()` 读取当前页面；
+> background 侧用 `onMessage` 注册 `GET_CURRENT_TAB` 处理器，`Message` /
+> `MessageResponse` 是这条通道的线格式。
 
 #### 用法示例
 
 ```ts
 import { getCurrentPageInfo } from '@/lib/messaging';
-import { sendMessage } from '@/lib/messaging';
 
-// 1) 直接读取当前页面（BrowserBookmarkForm 的做法）
+// 直接读取当前页面（BrowserBookmarkForm 的做法）
 const pageInfo = await getCurrentPageInfo();
 if (pageInfo) {
   console.log(pageInfo.url, pageInfo.title, pageInfo.favicon);
 }
-
-// 2) 走 background 消息通道（background 已实现 GET_CURRENT_TAB）
-const info = await sendMessage<
-  'GET_CURRENT_TAB',
-  { url: string; title: string; favicon?: string } | null
->('GET_CURRENT_TAB');
 ```
+
+background 侧如需接管 `GET_CURRENT_TAB`，用 `onMessage` 注册处理器（见
+`src/entrypoints/background`）。
 
 ---
 
@@ -1231,8 +1261,6 @@ const info = await sendMessage<
 
 | 导出 | 签名 | 说明 |
 |---|---|---|
-| `setLogLevel` | `setLogLevel(level: LogLevel): void` | 运行时修改级别 |
-| `getLogLevel` | `getLogLevel(): LogLevel` | 读取当前级别 |
 | `debug` | `debug(message: string, context?: string, ...args: unknown[]): void` | `console.log`，前缀 `🐛` |
 | `info` | `info(message: string, context?: string, ...args: unknown[]): void` | `console.log`，前缀 `ℹ️` |
 | `warn` | `warn(message: string, context?: string, ...args: unknown[]): void` | `console.warn`，前缀 `⚠️` |
@@ -1240,25 +1268,25 @@ const info = await sendMessage<
 | `createLogger` | `createLogger(context: string)` | 返回 `{ debug, info, warn, error }`，四个方法的签名都变成 `(message: string, ...args: unknown[])`，自动带上 `context` |
 
 > ⚠️ `LogLevel` 类型（`'debug' | 'info' | 'warn' | 'error' | 'none'`）**未导出**，
-> 只在模块内部使用；调用 `setLogLevel` 时传字面量即可。
+> 只在模块内部使用。
+> **级别只由构建期 `VITE_LOG_LEVEL` 决定**：`currentLogLevel` 是模块级 `const`，
+> 取 `import.meta.env.VITE_LOG_LEVEL`（构建期环境变量）优先，否则
+> `import.meta.env.MODE === 'development'` 时为 `'debug'`，生产为 `'error'`。
+> 运行期**没有任何读取或修改级别的接口**（v0.6 起已移除），要改级别必须
+> 带 `VITE_LOG_LEVEL` 重新构建。
 > 级别数值：`debug 0 < info 1 < warn 2 < error 3 < none 4`；`shouldLog` 判定为
 > `LOG_LEVELS[level] >= LOG_LEVELS[currentLogLevel]`。
-> 初始级别：`import.meta.env.VITE_LOG_LEVEL`（构建期环境变量）优先，
-> 否则 `import.meta.env.MODE === 'development'` 时为 `'debug'`，生产为 `'error'`。
 > 日志前缀格式为 `HH:MM:SS.mmm <emoji> [context]`。
 
 #### 用法示例
 
 ```ts
-import { createLogger, setLogLevel, getLogLevel } from '@/lib/logger';
+import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('MyFeature');
 logger.info('开始处理', { count: 3 });
 logger.warn('批次大小被修正');
 logger.error('请求失败', error);
-
-setLogLevel('debug');
-console.log(getLogLevel()); // 'debug'
 ```
 
 ---
@@ -1266,29 +1294,24 @@ console.log(getLogLevel()); // 'debug'
 ### 12. utils
 
 **导入路径**：`@/lib/utils` 或 `@/lib`
-**职责**：通用工具函数（类名合并、ID/时间、格式化、URL 规范化、去重键、
-防抖节流、重试、关键词、高亮）。
+**职责**：通用工具函数（类名合并、ID/时间、相对时间格式化、URL 规范化、去重键、
+关键词提取）。共 **13 个导出**。
 
 | 函数 | 签名 | 语义 |
 |---|---|---|
 | `cn` | `cn(...inputs: ClassValue[]): string` | `twMerge(clsx(inputs))`，Tailwind 类名合并 |
 | `generateId` | `generateId(): string` | `crypto.randomUUID()` |
 | `now` | `now(): number` | `Date.now()` |
-| `formatDate` | `formatDate(timestamp: number, locale = 'zh-CN'): string` | `Intl.DateTimeFormat`，`year/month(short)/day` |
-| `formatRelativeTime` | `formatRelativeTime(timestamp: number, locale = 'zh-CN'): string` | `Intl.RelativeTimeFormat`，按 年/月/周/日/时/分/秒 逐级回退 |
+| `formatRelativeTime` | `formatRelativeTime(timestamp: number, locale = 'zh-CN'): string` | `Intl.RelativeTimeFormat`（`numeric: 'auto'`），按 年/月/周/日/时/分/秒 逐级回退。实例按 `locale` 缓存在模块级 Map 里（私有 `getRelativeTimeFormatter`），避免列表渲染时反复构造 `Intl` |
 | `parseUrl` | `parseUrl(url: string): URL \| null` | `new URL` 失败返回 `null` |
 | `getDomain` | `getDomain(url: string): string` | `hostname`；解析失败**原样返回入参** |
 | `getFaviconUrl` | `getFaviconUrl(url: string, size = 32): string` | 返回 `https://www.google.com/s2/favicons?domain={domain}&sz={size}` |
 | `truncate` | `truncate(text: string, maxLength: number): string` | 超长时截到 `maxLength - 3` 再拼 `'...'` |
-| `debounce` | `debounce<T extends (...args: unknown[]) => unknown>(fn: T, delay: number): (...args: Parameters<T>) => void` | 尾触发防抖 |
-| `throttle` | `throttle<T extends (...args: unknown[]) => unknown>(fn: T, limit: number): (...args: Parameters<T>) => void` | 首次立即执行，`limit` 窗口内忽略 |
 | `sleep` | `sleep(ms: number): Promise<void>` | 延时 |
-| `retry` | `retry<T>(fn: () => Promise<T>, maxRetries = 3, delay = 1000): Promise<T>` | 最多 `maxRetries` 次；失败间隔 `delay * 2^i`（指数退避）；全部失败抛最后一次错误 |
 | `isValidUrl` | `isValidUrl(url: string): boolean` | 仅 `http:`/`https:` |
 | `normalizeUrl` | `normalizeUrl(url: string): string` | `origin + pathname（去尾部斜杠） + search`；解析失败原样返回 |
 | `getUrlKey` | `getUrlKey(url: string): string` | **去重键**：`normalizeUrl` 后 `toLowerCase()`，再去掉开头的 `http(s)://` 与 `www.` |
 | `extractKeywords` | `extractKeywords(text: string): string[]` | 小写、标点替换为空格、按空白分词、丢弃长度 ≤ 1 的词、去重 |
-| `highlightText` | `highlightText(text: string, query: string): { text: string; highlighted: boolean }[]` | 按 query 拆分文本并标记命中段；`query` 为空时返回整段未命中。内部 `escapeRegex` **未导出** |
 
 `getUrlKey` 示例：`'https://www.Example.com/a/'` → `'example.com/a'`。
 
@@ -1300,9 +1323,7 @@ import {
   getDomain,
   getFaviconUrl,
   getUrlKey,
-  debounce,
   formatRelativeTime,
-  retry,
 } from '@/lib/utils';
 
 console.log(getUrlKey('https://www.Example.com/a/')); // 'example.com/a'
@@ -1310,9 +1331,6 @@ console.log(getDomain('https://docs.example.com/x')); // 'docs.example.com'
 console.log(getFaviconUrl('https://example.com', 64));
 console.log(formatRelativeTime(Date.now() - 3 * 3600_000)); // '3小时前'
 console.log(cn('px-2', false && 'hidden', 'px-4'));          // 'px-4'
-
-const save = debounce(() => console.log('saved'), 300);
-const data = await retry(() => fetch('/api').then((r) => r.json()), 3, 1000);
 ```
 
 ---
@@ -1552,16 +1570,13 @@ applyTheme('light', 'rose' as PrimaryColor);
 
 | 模块 | 导出方式 | 主要内容 |
 |---|---|---|
-| `bookmark.ts` | `export *` | `BookmarkStatus`、`BookmarkMeta`、`Bookmark`、`CreateBookmarkDTO`、`UpdateBookmarkDTO`、`ImportResult` |
+| `bookmark.ts` | `export *` | `BookmarkStatus`、`BookmarkMeta`、`Bookmark`（`Bookmark` 含**必填字段 `urlKey: string`**，即 `getUrlKey(url)` 的标准化去重键） |
 | `browserBookmarks.ts` | `export *` | `BrowserBookmarkNode`、`BrowserTreeNode`、`BrowserTreeSnapshot`、`AuxBookmarkMeta`、`DuplicateRetentionStrategy`、`BrowserDuplicateGroup`、`BrowserBookmarkFilter` |
 | `messages.ts` | `export *` | `MessageType`（仅 `'GET_CURRENT_TAB'`）、`MessagePayloadMap`、`MessagePayload`、`Message`、`MessageResponse` |
-| `ai.ts` | `export *` | `AIProvider`、`ClassificationMethod`、`ClassificationResult`、`UrlInfo`、`ClassificationRule`、`RuleCondition`、`RuleAction`、`ContentType`、`AIConfig`、`LearningData`、`DeepSeekConfig`、`LLMClassificationResult`、`PromptTemplate`、`ClassificationCache`、`BatchClassifyOptions`、`CostStats` |
-| `linkHealth.ts` | `export *` | `LinkStatus`、`LinkCheckResult`、`LinkHealthReport`、`BatchCheckOptions`、`CheckProgress`、`LinkHealthConfig`、`LinkCheckHistory` |
-| `organizer.ts` | `export *` | `OrganizeStrategy`、`OrganizeOptions`、`OrganizeProgress`、`OrganizeChange`、`OrganizeResult`、`OrganizePreview`、`BookmarkGroup`、`DuplicateGroup`、`OrganizeHistory`、`SimilarityResult`、`ClusterResult`、`CleanupOptions`、`CleanupResult`、`PatternDiscovery`、`SmartSuggestion` |
-| `profile.ts` | **逐个导出**指定符号 + 2 个常量 | 类型：`BookmarkProfile`、`BookmarkCategory`、`CategoryConfig`、`CollectorLevel`、`CollectorLevelConfig`、`DomainStats`（在 `@/types` 里以别名 **`ProfileDomainStats`** 导出，避免与旧统计类型冲突）、`ShareCardData`、`TrendDataPoint`；常量：`COLLECTOR_LEVELS`、`CATEGORY_CONFIGS` |
-
-> ⚠️ `profile.ts` 里还有一个 `CATEGORY_COLORS: Record<BookmarkCategory, string>`
-> 常量，它**没有**出现在 `@/types` 的导出清单里，需从 `@/types/profile` 直接导入。
+| `ai.ts` | `export *` | `ClassificationMethod`、`ClassificationResult`、`UrlInfo`、`ClassificationRule`、`RuleCondition`、`RuleAction`、`ContentType`、`LearningData`、`DeepSeekConfig`、`LLMClassificationResult`、`PromptTemplate`、`ClassificationCache`、`BatchClassifyOptions`、`CostStats` |
+| `linkHealth.ts` | `export *` | `LinkStatus`、`LinkCheckResult`、`LinkHealthReport`、`BatchCheckOptions`、`CheckProgress`（源码末尾注明：链接历史记录已由 aux 库 `LinkCheckRecord` 承担） |
+| `organizer.ts` | `export *` | `OrganizeStrategy`、`OrganizeOptions`、`OrganizeChange`、`OrganizeResult`、`DuplicateGroup`、`OrganizeHistory` |
+| `profile.ts` | **逐个导出**指定符号 + 2 个常量 | 类型：`BookmarkProfile`、`BookmarkCategory`、`CategoryConfig`、`CollectorLevel`、`CollectorLevelConfig`、`DomainStats`（在 `@/types` 里以别名 **`ProfileDomainStats`** 导出，避免与旧统计类型冲突）、`TrendDataPoint`；常量：`COLLECTOR_LEVELS`、`CATEGORY_CONFIGS` |
 
 **两处 `DeepSeekConfig` 的定义差异**（同名不同源，注意区分）：
 
@@ -1588,7 +1603,8 @@ export interface AuxBookmarkMeta {
   linkStatus?: 'active' | 'broken' | 'pending' | 'unreachable';
   linkCheckedAt?: number;
   lastStatusCode?: number;    // 最近一次 HTTP 状态码（0 = 网络层失败）
-  lastErrorMessage?: string;
+  lastErrorMessage?: string;  // 软 404/超时等（展示用）
+  lastResponseTime?: number;  // 最近一次检查的响应时间（毫秒），报告聚合直接读，免查历史表
   linkStatusManual?: boolean; // 人工标记为正常：自动扫描不再改判（强制重查除外）
   aiGenerated?: boolean;
 }
@@ -1629,9 +1645,9 @@ export interface BatchCheckOptions {
 | `@/lib/httpChecker` | `httpChecker` | `HttpChecker`（无构造参数） | — |
 | `@/lib/deepseekClient` | — | `DeepSeekClient`（构造参数 `DeepSeekConfig`） | `createDeepSeekClient` |
 | `@/lib/urlAnalyzer` | `urlAnalyzer` | `UrlAnalyzer`（无构造参数） | — |
-| `@/lib/messaging` | — | — | `sendMessage`、`onMessage`、`getCurrentTab`、`getCurrentPageInfo` |
-| `@/lib/logger` | — | — | `setLogLevel`、`getLogLevel`、`debug`、`info`、`warn`、`error`、`createLogger` |
-| `@/lib/utils` | — | — | 18 个工具函数（见 [12 utils](#12-utils)） |
+| `@/lib/messaging` | — | — | `onMessage`、`getCurrentTab`、`getCurrentPageInfo` |
+| `@/lib/logger` | — | — | `debug`、`info`、`warn`、`error`、`createLogger`（级别由构建期 `VITE_LOG_LEVEL` 固定，运行期不可改） |
+| `@/lib/utils` | — | — | 13 个工具函数（见 [12 utils](#12-utils)） |
 | `@/stores/browserBookmarkStore` | `useBrowserBookmarkStore`（Zustand hook） | — | `selectAllTags`、`resetBrowserBookmarkStoreForTesting` |
 | `@/stores/uiStore` | `useUIStore`（Zustand hook） | — | `applyTheme`、`initializeTheme`、`PRIMARY_COLOR_OPTIONS` |
 
