@@ -10,6 +10,7 @@ import {
   Settings,
   Info,
 } from 'lucide-react';
+import { getExtensionVersion } from '@/lib/extensionInfo';
 
 interface NavItem {
   id: string;
@@ -85,7 +86,7 @@ export function SidebarNav({ activeTab, setActiveTab }: SidebarNavProps) {
       React.createElement('div', {
         className: 'pt-4 border-t border-gray-200 dark:border-zinc-800 text-xs text-gray-500 dark:text-gray-400',
       },
-        'v0.6.0'
+        `v${getExtensionVersion()}`
       )
     )
   );

@@ -142,15 +142,17 @@ pnpm zip            # .output/*.zip，用于上传商店
 1. `package.json` 的 `version`
 2. `wxt.config.ts` 里 `manifest.version`
 
-改完提交并打标签：
+改完提交并打标签（用带注释的 tag，把这一版的主要内容写在里面）：
 
 ```bash
 git add package.json wxt.config.ts
-git commit -m "chore: bump version to 0.7.0"
-git tag v0.7.0 && git push && git push --tags
+git commit -m "chore: bump version to 0.8.0"
+git tag -a v0.8.0 -F release-notes.txt && git push && git push origin v0.8.0
 ```
 
-> 当前 `package.json` 与 manifest 都是 `0.6.0`，但 `master` 上已有标注为 v0.7 的功能提交（可撤销整理、建议微调、规则扩充）。发版前记得把版本号补齐。
+> 版本号只在两处出现：`package.json` 的 `version` 与 `wxt.config.ts` 的
+> `manifest.version`（**UI 里不要写死**，一律用 `getExtensionVersion()` 从
+> manifest 读）。当前为 `0.7.0`，对应 git tag `v0.7.0`。
 
 ## 故障排查
 

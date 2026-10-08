@@ -1,9 +1,10 @@
-# 智能书签 API 参考（v0.6）
+# 智能书签 API 参考（v0.7）
 
 本文档是「智能书签」浏览器扩展（WXT 0.20 + React 18 + TypeScript，Chrome MV3）
-v0.6 重构后的 API 参考，面向**调用方**（页面、组件、测试）。
+的 API 参考，面向**调用方**（页面、组件、测试）。架构基线是 v0.6 那次重构
+（chrome.bookmarks 成为唯一数据源），此后新增的能力都叠加在它之上。
 
-**前提约定（v0.6 核心原则）**
+**前提约定（v0.6 重构确立的核心原则）**
 
 - **`chrome.bookmarks` 是唯一数据源**。扩展不自建书签库，浏览器书签由 Chrome
   账号同步；读取与写入全部直连 `chrome.bookmarks`。
@@ -1773,6 +1774,7 @@ export interface BatchCheckOptions {
 | `@/lib/learnedRules` | — | — | `loadLearnedRules`、`saveLearnedRules`、`clearLearnedRules`、`trimLearnedRules`、`lookupLearnedRule`、`matchLearnedRule`、`LEARNED_RULES_KEY`、`LEARNED_RULES_MAX`、`LEARNED_RULE_CONFIDENCE` |
 | `@/lib/httpChecker` | `httpChecker` | `HttpChecker`（无构造参数） | — |
 | `@/lib/scanSettings` | — | — | `loadScanSettings`、`saveScanSettings`、`toBatchCheckOptions`、`DEFAULT_SCAN_SETTINGS`、`SCAN_SETTINGS_KEY` |
+| `@/lib/extensionInfo` | — | — | `getExtensionVersion`（从 manifest 读版本号，UI 不要写死） |
 | `@/lib/deepseekClient` | — | `DeepSeekClient`（构造参数 `DeepSeekConfig`） | `createDeepSeekClient` |
 | `@/lib/urlAnalyzer` | `urlAnalyzer` | `UrlAnalyzer`（无构造参数） | — |
 | `@/lib/messaging` | — | — | `onMessage`、`getCurrentTab`、`getCurrentPageInfo` |
@@ -1798,6 +1800,6 @@ chrome.bookmarks ──► browserBookmarksService ──► browserBookmarkStor
 
 ## 18 相关文档
 
-- [架构设计（v0.6）](./architecture.md)
+- [架构设计](./architecture.md)
 - [开发指南](./development.md)
 - [项目 README](../README.md)

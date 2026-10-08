@@ -15,7 +15,7 @@ export default defineConfig({
   manifest: {
     name: '智能书签',
     description: '浏览器书签增强插件 - 秒级搜索、智能整理、死链检查、书签档案',
-    version: '0.6.0',
+    version: '0.7.0',
     permissions: [
       'bookmarks',
       'storage',

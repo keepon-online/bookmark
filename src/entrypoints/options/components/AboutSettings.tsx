@@ -1,6 +1,7 @@
 // 关于页面
 
 import * as React from 'react';
+import { getExtensionVersion } from '@/lib/extensionInfo';
 
 export function AboutSettings() {
   return React.createElement('div', { className: 'space-y-6' },
@@ -14,7 +15,7 @@ export function AboutSettings() {
       React.createElement('div', { className: 'space-y-2 text-sm text-gray-700 dark:text-gray-300' },
         React.createElement('div', { className: 'flex justify-between' },
           React.createElement('span', { className: 'text-gray-500 dark:text-gray-400' }, '版本'),
-          React.createElement('span', null, '0.6.0')
+          React.createElement('span', null, getExtensionVersion())
         ),
         React.createElement('div', { className: 'flex justify-between' },
           React.createElement('span', { className: 'text-gray-500 dark:text-gray-400' }, '技术栈'),

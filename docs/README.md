@@ -1,6 +1,6 @@
 # 智能书签 · 文档索引
 
-> 浏览器书签增强扩展（Chrome MV3）· 当前版本 **0.6.0**（`package.json` 与 `wxt.config.ts` 的 `manifest.version`）
+> 浏览器书签增强扩展（Chrome MV3）· 当前版本 **0.7.0**（`package.json` 与 `wxt.config.ts` 的 `manifest.version`；UI 里通过 `getExtensionVersion()` 读取，不要写死）
 
 本目录只保留**与当前代码一致**的现状文档。v0.5 时期的历史设计稿（自建书签库、Supabase 云同步、文件夹双向同步等）已在 v0.6 重构时删除，需要考古时从 git 历史取回：
 
@@ -60,6 +60,7 @@ src/
 │   ├── deepseekClient.ts     # DeepSeek HTTP 客户端（含 SSE 流式解析）
 │   ├── messaging.ts          # 与 background 的类型化消息通道
 │   ├── logger.ts             # 统一日志（VITE_LOG_LEVEL 控制）
+│   ├── extensionInfo.ts      # 从 manifest 读版本号等扩展自身信息
 │   └── utils.ts  urlAnalyzer.ts
 ├── stores/                   # browserBookmarkStore / uiStore
 ├── types/                    # 领域模型（bookmark / browserBookmarks / organizer / linkHealth / profile / ai / messages）
@@ -92,13 +93,13 @@ pnpm verify         # typecheck + lint + test:run + build 一条龙
 
 | 范围 | 文件 | 总行数 |
 |---|---|---|
-| 全部 `src/` | 107 | 15909 |
-| 其中源码（`*.ts` / `*.tsx`，不含测试） | 87 | 13016 |
+| 全部 `src/` | 108 | 15931 |
+| 其中源码（`*.ts` / `*.tsx`，不含测试） | 88 | 13038 |
 | 其中测试（13 个 `*.test.ts` + `src/test/setup.ts`） | 14 | 2709 |
 | services | 8 | 2996 |
 | components | 36 | 5307 |
-| lib | 10 | 1629 |
-| entrypoints | 22 | 1880 |
+| lib | 11 | 1649 |
+| entrypoints | 22 | 1882 |
 | types | 8 | 715 |
 | stores | 3 | 489 |
 
