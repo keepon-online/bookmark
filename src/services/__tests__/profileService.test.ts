@@ -39,6 +39,27 @@ describe('profileService v2', () => {
     expect(profile.collectorTitle).toBeTruthy();
   });
 
+  it('组织度评分与「分类整理率」同口径：散落在书签栏的书签不计入入夹率', () => {
+    // 两个书签都直接躺在书签栏（path 为 '书签栏'），既没进子文件夹也没打标签
+    const loose = [
+      node('1', 'https://a.example.com', 'A', 1000, '书签栏'),
+      node('2', 'https://b.example.com', 'B', 2000, '书签栏'),
+    ];
+    const barProfile = profileService.getProfile({ bookmarks: loose, folders: [], meta: {} });
+    expect(barProfile.folderedRate).toBe(0);
+    // 入夹率 0 + 打标率 0 → 评分必须为 0，不能因为"有 parentId 有 path"就白拿 50 分
+    expect(barProfile.organizationScore).toBe(0);
+
+    // 放进子文件夹后才计入入夹率：占评分 50% 权重 → 50 分
+    const folderedProfile = profileService.getProfile({
+      bookmarks: [node('3', 'https://c.example.com', 'C', 3000, '书签栏/开发')],
+      folders: [node('f1', '', '开发', 500, '书签栏')],
+      meta: {},
+    });
+    expect(folderedProfile.folderedRate).toBe(100);
+    expect(folderedProfile.organizationScore).toBe(50);
+  });
+
   it('空数据不崩溃', () => {
     const profile = profileService.getProfile({ bookmarks: [], folders: [], meta: {} });
     expect(profile.totalBookmarks).toBe(0);

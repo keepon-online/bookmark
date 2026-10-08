@@ -237,6 +237,8 @@ export class OrganizerService {
   async apply(suggestions: OrganizeSuggestion[]): Promise<ApplyResult> {
     const result: ApplyResult = { applied: 0, moved: 0, tagged: 0, errors: [] };
     const changes: OrganizeChange[] = [];
+    // 应用成功的建议：学习回流只认这些，抛错的不能沉淀成规则
+    const appliedSuggestions: OrganizeSuggestion[] = [];
 
     for (const suggestion of suggestions) {
       try {
@@ -287,14 +289,16 @@ export class OrganizerService {
         }
 
         result.applied++;
+        appliedSuggestions.push(suggestion);
       } catch (error) {
         result.errors.push(`${suggestion.node.title || suggestion.node.url}: ${(error as Error).message}`);
       }
     }
 
-    // 学习回流：高置信度 AI 建议被用户确认应用 → 固化为域名级规则，
-    // 后续同域名书签直接走规则，AI 用量随使用递减
-    const learnable = suggestions.filter(
+    // 学习回流：高置信度 AI 建议被用户确认并成功应用 → 固化为域名级规则，
+    // 后续同域名书签直接走规则，AI 用量随使用递减。
+    // 只认应用成功的建议：移动或写标签抛错的那些不能沉淀为规则
+    const learnable = appliedSuggestions.filter(
       (suggestion) =>
         suggestion.engine === 'deepseek' &&
         suggestion.confidence >= LEARN_MIN_CONFIDENCE &&

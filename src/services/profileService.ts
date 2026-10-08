@@ -37,8 +37,9 @@ export class ProfileService {
       categoryDistribution[category.id] = 0;
     }
     const tagSet = new Set<string>();
-    let folderedCount = 0; // 严格口径：已放入子文件夹（非根目录散落）
-    let folderedLooseCount = 0; // 宽口径：有父级与路径即算（组织度评分用）
+    // 已放入子文件夹的书签（非直接散落在「书签栏」「其他书签」根下）。
+    // 展示的「分类整理率」与组织度评分共用这一口径
+    let folderedCount = 0;
     let taggedCount = 0;
     let favoriteCount = 0;
     let brokenCount = 0;
@@ -69,9 +70,6 @@ export class ProfileService {
       }
       categoryDistribution[this.categorize(domain, node.title)]++;
 
-      if (node.parentId && node.path) {
-        folderedLooseCount++;
-      }
       if (node.path && node.path !== '书签栏' && node.path !== '其他书签') {
         folderedCount++;
       }
@@ -141,13 +139,15 @@ export class ProfileService {
       }
     }
 
-    // 组织度评分：入夹率（宽口径，有路径即算）+ 打标率 - 重复/失效惩罚
-    const folderedRatioLoose = total > 0 ? folderedLooseCount / total : 0;
+    // 组织度评分：入夹率 + 打标率 - 重复/失效惩罚。
+    // 入夹率用严格口径（真的放进了子文件夹），与仪表盘展示的「分类整理率」
+    // 同源，避免出现"评分判定结构良好、指标却显示 0%"的自相矛盾
+    const folderedRatio = total > 0 ? folderedCount / total : 0;
     const taggedRatio = total > 0 ? taggedCount / total : 0;
     const duplicatePenalty = total > 0 ? Math.min(duplicateCount / total, 0.2) : 0;
     const brokenPenalty = total > 0 ? Math.min(brokenCount / total, 0.2) : 0;
     const organizationScore = Math.round(
-      Math.max(0, Math.min(1, folderedRatioLoose * 0.5 + taggedRatio * 0.5 - duplicatePenalty - brokenPenalty)) * 100
+      Math.max(0, Math.min(1, folderedRatio * 0.5 + taggedRatio * 0.5 - duplicatePenalty - brokenPenalty)) * 100
     );
 
     // 收藏家积分与等级

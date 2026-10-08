@@ -285,4 +285,58 @@ describe('organizerService v2', () => {
 
     batchSpy.mockRestore();
   });
+
+  it('应用失败的建议不回流为学习规则，只有成功应用的才固化', async () => {
+    const backing: Record<string, unknown> = {
+      deepseekConfig: { enabled: true, apiKey: 'test-key', model: 'deepseek-chat' },
+    };
+    (chrome.storage.local.get as Mock).mockImplementation(async (key: string) =>
+      key in backing ? { [key]: backing[key] } : {}
+    );
+    (chrome.storage.local.set as Mock).mockImplementation(async (items: Record<string, unknown>) => {
+      Object.assign(backing, items);
+    });
+
+    const batchSpy = vi
+      .spyOn(deepSeekAIService, 'batchClassify')
+      .mockResolvedValue([
+        {
+          suggestedTags: ['AI'],
+          suggestedFolder: '技术/AI',
+          contentType: 'article',
+          confidence: 0.95,
+          method: 'llm' as const,
+          reasoning: 'AI 资讯文章',
+        },
+      ] as never);
+
+    const suggestions = await organizerService.suggest(
+      [node('40', 'https://failing.example.com/post', '会失败的书签')],
+      {}
+    );
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0].engine).toBe('deepseek');
+
+    // 目录可确保创建，但移动本身失败
+    (chrome.bookmarks.getChildren as Mock).mockResolvedValue([]);
+    (chrome.bookmarks.create as Mock).mockImplementation(
+      async (arg: chrome.bookmarks.BookmarkCreateArg) =>
+        ({
+          id: `folder-${arg.title}`,
+          parentId: arg.parentId ?? '1',
+          title: arg.title ?? '',
+          index: 0,
+        }) as chrome.bookmarks.BookmarkTreeNode
+    );
+    (chrome.bookmarks.move as Mock).mockRejectedValue(new Error('move failed'));
+
+    const result = await organizerService.apply(suggestions);
+
+    expect(result.applied).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    // 失败的建议不能沉淀成域名规则，否则下次同域名的正确分类会被错误规则抢先
+    expect(backing.learnedDomainRules).toBeUndefined();
+
+    batchSpy.mockRestore();
+  });
 });
