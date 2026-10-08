@@ -82,7 +82,7 @@ pnpm test:coverage   # v8 覆盖率
 
 配置在 `vitest.config.ts`：环境 `happy-dom`，全局 setup 为 `src/test/setup.ts`，别名 `@` → `src`。
 
-现状：**8 个测试文件 / 53 个用例**。按文件分布：`regressions.test.ts`（19 例，死链判定、并发队列、`httpChecker`、aux 相关回归）、`browserBookmarksService`(6)、`organizerService`(9)、`browserBookmarkStore`(6)、`setup`(4)、`commandHandlers`(3)、`uiStore`(3)、`profileService`(3)。`aiService`（规则引擎）、`deepseekAIService`、UI 组件尚无测试，欢迎补。
+现状：**10 个测试文件 / 66 个用例**。按文件分布：`regressions.test.ts`（22 例，死链判定、并发队列、`httpChecker`、健康报告聚合与 aux 相关回归）、`organizerService`(9)、`browserBookmarksService`(6)、`browserBookmarkStore`(6)、`deepseekClient`(5，请求重试策略)、`learnedRules`(5)、`setup`(4)、`commandHandlers`(3)、`profileService`(3)、`uiStore`(3)。`aiService`（规则引擎）、`deepseekAIService` 与 UI 组件尚无测试，欢迎补。
 
 三条实践约定：
 

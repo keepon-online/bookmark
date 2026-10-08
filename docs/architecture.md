@@ -109,10 +109,11 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 
 ## 测试策略
 
-- 服务层单测：注入假 `chrome` API（`BookmarksApi` 等）+ `fake-indexeddb`（aux），覆盖树规范化、查重、空文件夹检测、整理建议/应用与学习回流、死链判定与并发队列、档案计算。
+- 服务层单测：注入假 `chrome` API（`BookmarksApi` 等）+ `fake-indexeddb`（aux），覆盖树规范化、查重、空文件夹检测、整理建议/应用与学习回流、死链判定与并发队列、健康报告的零查询聚合、档案计算。
+- 基础库单测：学习规则的存取与容量裁剪（`learnedRules`）、DeepSeek 客户端的请求重试策略（`deepseekClient`）。
 - entrypoints 单测：后台消息处理与启动装配（`commandHandlers`、`setup`）。
 - store 单测：事件订阅、元数据联动清理、标签派生。
-- 现状：8 个测试文件 / 53 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
+- 现状：10 个测试文件 / 66 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
 - 每次提交前跑 `pnpm typecheck` / `pnpm lint` / `pnpm test -- --run` / `pnpm build`（仓库还没有 CI）。
 
 ## 相关文档

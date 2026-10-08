@@ -3,8 +3,9 @@ import 'fake-indexeddb/auto';
 import { auxDb } from '@/lib/auxDatabase';
 import { httpChecker } from '@/lib/httpChecker';
 import { linkHealthService, classifyLinkStatus, nextDomainInterval } from '@/services/linkHealthService';
+import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 
-function makeNode(id: string, url: string) {
+function makeNode(id: string, url: string): BrowserBookmarkNode {
   return {
     id,
     parentId: '1',
@@ -14,6 +15,11 @@ function makeNode(id: string, url: string) {
     dateAdded: 100,
     path: '书签栏',
   };
+}
+
+// 构造一条元数据记录，只覆盖关心的字段
+function baseMeta(bookmarkId: string, overrides: Partial<AuxBookmarkMeta> = {}): AuxBookmarkMeta {
+  return { bookmarkId, tags: [], isFavorite: false, visitCount: 0, ...overrides };
 }
 
 // 构造带正文的 200 响应（用于软 404 检测）
@@ -528,5 +534,95 @@ describe('regressions', () => {
     // 确认所有 6 个书签全部被成功检查，没有 worker 提前退出导致遗漏
     expect(results).toHaveLength(6);
     expect(results.map((r) => r.bookmarkId).sort()).toEqual(nodes.map((n) => n.id).sort());
+  });
+
+  it('getHealthReport 只按 meta.linkStatus 聚合，pending 取差值', async () => {
+    const nodes = [
+      makeNode('1', 'https://a.com'),
+      makeNode('2', 'https://b.com'),
+      makeNode('3', 'https://c.com'),
+      makeNode('4', 'https://d.com'),
+    ];
+    const meta: Record<string, AuxBookmarkMeta> = {
+      '1': baseMeta('1', { linkStatus: 'active' }),
+      '2': baseMeta('2', { linkStatus: 'broken' }),
+      '3': baseMeta('3', { linkStatus: 'unreachable' }),
+      // '4' 没有任何记录 → 计入 pending
+    };
+
+    const report = await linkHealthService.getHealthReport(nodes, meta);
+
+    expect(report).toMatchObject({ total: 4, healthy: 1, broken: 1, unreachable: 1, pending: 1 });
+    expect(report.byStatus).toEqual({ unknown: 1, healthy: 1, broken: 1, timeout: 1, error: 0 });
+  });
+
+  it('getHealthReport 的响应时间与最后检查时间读 meta 冗余字段，不查 linkChecks 历史表', async () => {
+    const nodes = [
+      makeNode('1', 'https://a.com'),
+      makeNode('2', 'https://b.com'),
+      makeNode('3', 'https://c.com'),
+    ];
+    const meta: Record<string, AuxBookmarkMeta> = {
+      '1': baseMeta('1', { linkStatus: 'active', linkCheckedAt: 1000, lastResponseTime: 100 }),
+      '2': baseMeta('2', { linkStatus: 'broken', linkCheckedAt: 3000, lastResponseTime: 300 }),
+      // 检查过但没拿到有效响应时间（0）→ 不参与平均
+      '3': baseMeta('3', { linkStatus: 'active', linkCheckedAt: 2000, lastResponseTime: 0 }),
+    };
+
+    // 历史表里放一条极端记录：如果报告改成查 linkChecks，这两个断言就会失败
+    await auxDb.linkChecks.put({
+      id: 'stale-record',
+      bookmarkId: '1',
+      status: 200,
+      isAccessible: true,
+      responseTime: 9999,
+      checkedAt: 5000,
+    });
+
+    const report = await linkHealthService.getHealthReport(nodes, meta);
+
+    expect(report.avgResponseTime).toBe(200); // (100 + 300) / 2
+    expect(report.lastCheckedAt).toBe(3000); // 取 meta 里的最大值，而不是历史表的 5000
+  });
+
+  it('resetCheckResults 清掉全部检查结果字段，但保留标签、备注与收藏', async () => {
+    await auxDb.bookmarkMeta.put(
+      baseMeta('1', {
+        tags: ['前端'],
+        notes: '备注',
+        isFavorite: true,
+        visitCount: 3,
+        linkStatus: 'broken',
+        linkCheckedAt: 100,
+        lastStatusCode: 404,
+        lastErrorMessage: '404',
+        lastResponseTime: 50,
+        linkStatusManual: true,
+      })
+    );
+    await auxDb.linkChecks.put({
+      id: 'r1',
+      bookmarkId: '1',
+      status: 404,
+      isAccessible: false,
+      responseTime: 50,
+      checkedAt: 100,
+    });
+
+    await linkHealthService.resetCheckResults();
+
+    const after = await auxDb.bookmarkMeta.get('1');
+    expect(after?.tags).toEqual(['前端']);
+    expect(after?.notes).toBe('备注');
+    expect(after?.isFavorite).toBe(true);
+    expect(after?.visitCount).toBe(3);
+    // 检查结果相关的字段全部抹掉
+    expect(after?.linkStatus).toBeUndefined();
+    expect(after?.linkCheckedAt).toBeUndefined();
+    expect(after?.lastStatusCode).toBeUndefined();
+    expect(after?.lastErrorMessage).toBeUndefined();
+    expect(after?.lastResponseTime).toBeUndefined();
+    expect(after?.linkStatusManual).toBeUndefined();
+    expect(await auxDb.linkChecks.count()).toBe(0);
   });
 });
