@@ -405,20 +405,6 @@ export class AIService {
   }
 
   /**
-   * 批量分类书签
-   */
-  async batchClassify(bookmarks: Bookmark[]): Promise<ClassificationResult[]> {
-    const results: ClassificationResult[] = [];
-
-    for (const bookmark of bookmarks) {
-      const result = await this.classifyBookmark(bookmark);
-      results.push(result);
-    }
-
-    return results;
-  }
-
-  /**
    * 从书签中提取关键词（优化版 - 减少标签数量）
    */
   private extractKeywordsFromBookmark(bookmark: Bookmark): string[] {

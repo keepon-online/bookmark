@@ -209,7 +209,6 @@ await service.loadTree();
 | 方法 | 签名 | 返回 | 语义 |
 |---|---|---|---|
 | `classifyBookmark` | `classifyBookmark(bookmark: Bookmark): Promise<ClassificationResult>` | 分类结果 | 先按 `priority` 降序匹配规则，命中即返回（`confidence: 0.85`、`method: 'rule'`、`matchedRuleId`）；未命中则走关键词 + 内容类型启发式 |
-| `batchClassify` | `batchClassify(bookmarks: Bookmark[]): Promise<ClassificationResult[]>` | 结果数组 | 逐个 `await classifyBookmark`，**顺序与入参一致**（无并发、无缓存、无 API 调用） |
 | `learnFromUserCorrections` | `learnFromUserCorrections(input: { url: string; originalTags?: string[] }, userTags: string[], userFolder?: string): Promise<void>` | — | 把用户纠正追加到内存 `learningData`；源码中学习算法仍是 `TODO`，**不会改变分类结果**。注意写入的 `originalFolder` 取的是 `userFolder` 参数 |
 | `getRules` | `getRules(): ClassificationRule[]` | 规则**副本** | 浅拷贝数组，外部改数组不影响内部 |
 | `addRule` | `addRule(rule: ClassificationRule): void` | — | 追加一条规则 |
@@ -322,8 +321,6 @@ const result = await aiService.classifyBookmark(bookmark);
 //   confidence: 0.85, method: 'rule', matchedRuleId: 'frontend-frameworks' }
 console.log(result.suggestedFolder, result.suggestedTags, result.confidence, result.matchedRuleId);
 
-const results = await aiService.batchClassify([bookmark]);
-
 // 规则管理
 const rules = aiService.getRules();
 aiService.addRule({
@@ -415,7 +412,6 @@ API Key 不存在 `.env`，而是由设置页写入 **`chrome.storage.local` 的
   `'LLM批量调用失败，使用本地分类'`）；否则该批结果留空。
 - 每批结束回调 `onProgress(results.filter(r => r).length, total)`；
   批与批之间 `await delay(500)` 以避免限流。
-- ⚠️ `BatchClassifyOptions.useCache` 在类型里存在，但**实现未读取**——缓存始终启用。
 
 #### 缓存与成本统计的持久化
 
@@ -960,7 +956,6 @@ HEAD→GET 回退 + 软 404（停放域名）识别。
 export interface CheckOptions {
   method?: 'HEAD' | 'GET';  // 默认 'HEAD'
   timeout?: number;         // 默认 5000
-  maxRedirects?: number;    // 默认 3 —— ⚠️ 声明但实现未使用（fetch 固定 redirect: 'follow'）
   retries?: number;         // 默认 2
   retryDelay?: number;      // 默认 1000
 }
@@ -1102,8 +1097,8 @@ console.log(httpChecker.isValidUrl('chrome://bookmarks')); // false
 export interface DeepSeekConfig {
   apiKey: string;
   baseURL?: string;   // 默认 'https://api.deepseek.com/v1'
-  timeout?: number;   // 默认 30000
-  maxRetries?: number; // 默认 3 —— ⚠️ 声明并保存，但 request() 未读取（当前无重试实现）
+  timeout?: number;   // 默认 30000（单次尝试的超时）
+  maxRetries?: number; // 默认 3，含义是**总尝试次数**（即最多重试 2 次）
 }
 
 export interface ChatMessage {
@@ -1157,12 +1152,16 @@ export class DeepSeekAPIError extends Error {
 （`baseURL` 默认 `'https://api.deepseek.com/v1'`、`timeout` 默认 `30000`、
 `maxRetries` 默认 `3`）。
 
+**请求层重试策略**：`maxRetries` 是总尝试次数；只对"值得重试"的失败重试——
+网络层失败与超时（无状态码）、`429`、`5xx`，退避为 `500ms × 2^attempt`；
+其余 4xx（如 401 密钥错误、400 参数错误）重试结果相同，直接抛出。
+超时是**单次尝试**的超时，因此最坏耗时约为 `timeout × maxRetries + 退避`。
+
 | 方法 | 签名 | 返回 | 语义 |
 |---|---|---|---|
 | `chatCompletions` | `chatCompletions(params: ChatCompletionParams): Promise<ChatCompletionResponse>` | 完整响应 | `POST {baseURL}/chat/completions`。请求体固定 `stream: false`，`temperature ?? 0.7`、`max_tokens ?? 2000`、`top_p ?? 1.0` |
-| `streamChatCompletions` | `streamChatCompletions(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk>` | 异步生成器 | 请求体固定 `stream: true`；按 SSE 逐行解析，跳过空行与 `data: [DONE]`，只 yield `data: ` 前缀且能 `JSON.parse` 成功的块；解析失败的块只 `console.error` 后跳过 |
+| `streamChatCompletions` | `streamChatCompletions(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk>` | 异步生成器 | 请求体固定 `stream: true`；按 SSE 逐行解析，跳过空行与 `data: [DONE]`，只 yield `data: ` 前缀且能 `JSON.parse` 成功的块；解析失败的块只 `console.error` 后跳过。**注意：流式路径不经过重试包装** |
 | `testConnection` | `testConnection(): Promise<boolean>` | 是否连通 | 用 `model: 'deepseek-chat'`、`max_tokens: 5` 发一句 `Hello`，返回 `!!response.choices?.[0]?.message?.content`；异常返回 `false` |
-| `getLastUsage` | `getLastUsage(): { promptTokens: number; completionTokens: number; totalTokens: number } \| null` | **恒为 `null`** | 源码里仍是 `TODO`，未实现 |
 
 `request<T>(endpoint, options)` 为 `private`。错误处理：非 2xx 时读取响应体并抛
 `DeepSeekAPIError(error.error?.message || \`HTTP ${status}\`, status, error)`；
@@ -1616,13 +1615,11 @@ export interface BrowserTreeSnapshot {
   folders: BrowserBookmarkNode[];   // 所有文件夹平铺（不含虚拟根 '0'）
 }
 
-// 批量检查选项（⚠️ batchSize / onlyNew 声明了但 linkHealthService 未使用）
+// 批量检查选项
 export interface BatchCheckOptions {
-  batchSize?: number;
   concurrency?: number;
   timeout?: number;
   retries?: number;
-  onlyNew?: boolean;
   skipRecentHours?: number;
   whitelist?: string[];
   force?: boolean;

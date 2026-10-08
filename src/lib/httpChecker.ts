@@ -7,8 +7,6 @@ export interface CheckOptions {
   method?: 'HEAD' | 'GET';
   // 超时时间 (毫秒)
   timeout?: number;
-  // 最大重定向次数
-  maxRedirects?: number;
   // 重试次数
   retries?: number;
   // 重试延迟 (毫秒)
@@ -48,7 +46,6 @@ export interface CheckResult {
 const DEFAULT_OPTIONS: Required<CheckOptions> = {
   method: 'HEAD',
   timeout: 5000,
-  maxRedirects: 3,
   retries: 2,
   retryDelay: 1000,
 };

@@ -45,16 +45,12 @@ export interface LinkHealthReport {
 
 // 批量检查选项
 export interface BatchCheckOptions {
-  // 批次大小
-  batchSize?: number;
   // 并发数
   concurrency?: number;
   // 超时时间 (毫秒)
   timeout?: number;
   // 重试次数
   retries?: number;
-  // 只检查未检查过的
-  onlyNew?: boolean;
   // 是否跳过最近检查过的
   skipRecentHours?: number;
   // 白名单域名（这些域名跳过检查）

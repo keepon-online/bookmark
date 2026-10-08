@@ -1,5 +1,10 @@
 // DeepSeek API 客户端
 
+import { sleep } from './utils';
+
+// 重试的指数退避基数（毫秒）：500 / 1000 / 2000 ...
+const RETRY_BASE_DELAY_MS = 500;
+
 /**
  * DeepSeek API 配置
  */
@@ -102,13 +107,44 @@ export class DeepSeekClient {
   }
 
   /**
-   * 发起 HTTP 请求
+   * 发起 HTTP 请求。
+   * 网络层失败/超时、429 与 5xx 会按 maxRetries 指数退避重试；
+   * 其余 4xx 重试结果一样，直接抛出。
    */
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.config.baseURL}${endpoint}`;
+    const maxAttempts = Math.max(1, this.config.maxRetries);
+    let lastError = new DeepSeekAPIError('Unknown error occurred');
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await this.requestOnce<T>(url, options);
+      } catch (error) {
+        lastError =
+          error instanceof DeepSeekAPIError ? error : new DeepSeekAPIError('Unknown error occurred');
+
+        // 无状态码 = 网络层失败或超时；429 与 5xx 属瞬时故障
+        const retryable =
+          lastError.statusCode === undefined ||
+          lastError.statusCode === 429 ||
+          lastError.statusCode >= 500;
+        if (!retryable || attempt === maxAttempts - 1) {
+          throw lastError;
+        }
+        await sleep(RETRY_BASE_DELAY_MS * 2 ** attempt);
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * 单次请求（带超时与错误归一化）
+   */
+  private async requestOnce<T>(url: string, options: RequestInit): Promise<T> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
 
@@ -253,14 +289,6 @@ export class DeepSeekClient {
     } catch {
       return false;
     }
-  }
-
-  /**
-   * 获取使用统计（从响应中）
-   */
-  getLastUsage(): { promptTokens: number; completionTokens: number; totalTokens: number } | null {
-    // TODO: 实现使用统计跟踪
-    return null;
   }
 }
 
