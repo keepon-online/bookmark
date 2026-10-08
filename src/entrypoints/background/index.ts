@@ -4,7 +4,7 @@
 
 import { onMessage, getCurrentPageInfo } from '@/lib/messaging';
 import { browserBookmarks, BOOKMARK_BAR_ID } from '@/services/browserBookmarksService';
-import { auxDb, defaultMeta, sweepOrphanMeta } from '@/lib/auxDatabase';
+import { auxDb, defaultMeta, reconcileMeta } from '@/lib/auxDatabase';
 import { getUrlKey } from '@/lib/utils';
 import type { Message, MessageResponse } from '@/types';
 import { setupAlarms } from './setup/alarms';
@@ -43,10 +43,11 @@ export default defineBackground(() => {
     return next.isFavorite;
   }
 
-  // 对比当前书签树，清理已删除书签的元数据
+  // 对比当前书签树：认领可回收的元数据（书签被重加/换设备同步）并清理真正的孤儿
   async function cleanOrphanMeta(): Promise<number> {
     const snapshot = await browserBookmarks.loadTree();
-    return sweepOrphanMeta(new Set(snapshot.bookmarks.map((bookmark) => bookmark.id)));
+    const { removed } = await reconcileMeta(snapshot.bookmarks);
+    return removed;
   }
 
   // 初始化

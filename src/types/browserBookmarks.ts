@@ -28,6 +28,11 @@ export interface BrowserTreeSnapshot {
 // 扩展自有元数据：浏览器书签没有、按书签节点 id 关联的字段
 export interface AuxBookmarkMeta {
   bookmarkId: string;
+  // 规范化 URL 键（getUrlKey）。书签节点 id 会变（删除后重加、换设备同步），
+  // 靠它把元数据认领回来，见 auxDatabase.reconcileMeta
+  urlKey?: string;
+  // 书签消失后开始等待认领的时间戳；超过 ORPHAN_META_TTL_MS 仍无人认领才清理
+  orphanedAt?: number;
   tags: string[];
   notes?: string;
   isFavorite: boolean;

@@ -28,15 +28,15 @@ browserBookmarkStore (Zustand)   ← 整树快照 + 视图状态，事件去抖 
 UI: popup / sidepanel / options
         │
 SmartBookmarkAuxDB (Dexie)       ← 增强元数据，按书签节点 id 关联
-  - bookmarkMeta:    tags[] / notes / isFavorite / visitCount / lastVisited /
-                     linkStatus / linkCheckedAt / lastStatusCode /
+  - bookmarkMeta:    urlKey / orphanedAt / tags[] / notes / isFavorite / visitCount /
+                     lastVisited / linkStatus / linkCheckedAt / lastStatusCode /
                      lastErrorMessage / lastResponseTime / linkStatusManual /
                      aiGenerated
   - linkChecks:      死链检查历史
   - organizeHistory: AI 整理历史
 ```
 
-Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`quick-add`、`toggle-favorite`、`search-bookmarks`）、右键菜单、书签删除事件的孤儿元数据清扫、定时任务占位（`link-health-check`：每 24 小时触发，目前只打日志，尚未接上自动扫描）。消息通道仅保留 `GET_CURRENT_TAB`。
+Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`quick-add`、`toggle-favorite`、`search-bookmarks`）、右键菜单、书签删除事件的元数据对账（`reconcileMeta`：认领可回收的、清理真正失效的）、定时任务占位（`link-health-check`：每 24 小时触发，目前只打日志，尚未接上自动扫描）。消息通道仅保留 `GET_CURRENT_TAB`。
 
 ## 分层职责
 
@@ -68,7 +68,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 
 | 模块 | 职责 |
 |---|---|
-| `lib/auxDatabase.ts` | Dexie 实例、默认元数据、孤儿清扫、JSON 导出/导入 |
+| `lib/auxDatabase.ts` | Dexie 实例、默认元数据、元数据对账（`reconcileMeta`：按 `urlKey` 认领 + 孤儿清理）、JSON 导出/导入 |
 | `lib/httpChecker.ts` | HTTP 检查器：网络错误分级（timeout / network / ssl / blocked）、HEAD→GET 回退、指数退避、软 404（停放域名）识别 |
 | `lib/deepseekClient.ts` | DeepSeek HTTP 客户端（含 SSE 流式解析与自定义错误类型） |
 | `lib/messaging.ts` | 类型化的消息收发，`GET_CURRENT_TAB` 等后台专属能力 |
@@ -81,7 +81,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 
 ## 关键流程
 
-**书签变更同步**：任何来源（扩展自身、用户在浏览器里操作、Chrome 账号同步）改动书签 → `chrome.bookmarks` 事件 → store 去抖 150ms → 整树重载 → 顺带清扫孤儿元数据。可靠性优先于增量更新，`getTree()` 是毫秒级的。
+**书签变更同步**：任何来源（扩展自身、用户在浏览器里操作、Chrome 账号同步）改动书签 → `chrome.bookmarks` 事件 → store 去抖 150ms → 整树重载 → 顺带对账元数据（按 `urlKey` 认领可回收的、清理真正失效的孤儿）。可靠性优先于增量更新，`getTree()` 是毫秒级的。
 
 **AI 整理**：`organizerService.suggest()` 只读生成建议，**规则先行**——先套用已学习的域名规则与本地规则引擎（免配置、零成本），只把规则未覆盖的长尾交给 DeepSeek，并把用户现有目录树注入提示词；AI 不可用时保留规则结果 → 用户在预览里勾选、微调 → `apply()` 逐条写 `chrome.bookmarks`（移动）与 aux（标签），把**应用成功的**高置信度 AI 建议固化为域名级学习规则 → 记录到 `organizeHistory`，支持撤销。
 
@@ -90,11 +90,13 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 ## 元数据生命周期与已知边界
 
 - **创建**：用户打标签/收藏/写备注，或 AI 整理与死链检查写入。
-- **清扫**：书签被删除 → 后台 `bookmarkListeners` 与 store 刷新时双重兜底，按当前树的有效 id 集合清除孤儿元数据。
+- **对账与清理**：书签被删除 → 后台 `bookmarkListeners` 与 store 刷新时双重兜底调用 `reconcileMeta`：能给新节点认领的就认领（见下方"已知取舍"），暂时无人认领的先打 `orphanedAt` 等待 90 天，超时才真正清除。
 - **备份**：设置页 → 书签管理 → 元数据导出/导入（JSON，合并写入）。导出内容含 aux 三张表与 AI 学习规则 `learnedDomainRules`（后者按 key 合并，导入方优先）。
 - **重装扩展**：浏览器书签无损，仅丢失增强元数据。
 
-**已知边界**：元数据只按书签节点 id 关联。用户在浏览器里**删除后重新添加**同一个链接会得到新 id，旧标签与备注会被当作孤儿清扫掉；换设备时 Chrome 同步也可能带来不同的节点 id。这是"零迁移负担"的取舍代价，若要做无损保留，需要引入基于 `urlKey` 的重绑定层（尚未实现）。
+**元数据与书签的关联方式**：以书签节点 id 为主键，同时记录规范化 URL 键 `urlKey`。浏览器里的节点 id 会变——**删除后重新添加**同一个链接、或换设备时 Chrome 同步带来的新 id——此时由 `reconcileMeta` 按 `urlKey` 把元数据**认领**回新节点，标签与备注不会丢。无人认领的元数据保留 90 天（`ORPHAN_META_TTL_MS`）后清理，避免无限增长。
+
+**仍存的边界**：认领只在"新节点还没有自己的元数据"时发生，所以如果同一个链接同时存在多份、且各自都打过标签，重加后只能认回其中一份；另外两份同名书签的元数据不会自动合并。
 
 **另一个已知取舍**：AI 学习规则的粒度是**整个域名**（`learnedDomainRules` 以域名为 key）。同一域名的多用途书签会共用一条规则、互相覆盖，学错时在下一次学习覆盖它之前会一直抢先于 LLM。因此设置页 → AI 设置提供了「AI 学习规则」面板用于查看与清空，让误学可发现、可撤销；不做"域名 + 内容类型"细粒度的原因见 `@/lib/learnedRules` 的注释（本地 `inferContentType` 主要看 URL 与域名，同一域名通常只映射到同一类型，细化收益小却明显降低命中率）。
 
@@ -110,10 +112,10 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 ## 测试策略
 
 - 服务层单测：注入假 `chrome` API（`BookmarksApi` 等）+ `fake-indexeddb`（aux），覆盖树规范化、查重、空文件夹检测、整理建议/应用与学习回流、死链判定与并发队列、健康报告的零查询聚合、档案计算。
-- 基础库单测：学习规则的存取与容量裁剪（`learnedRules`）、DeepSeek 客户端的请求重试策略（`deepseekClient`）。
+- 基础库单测：元数据对账（`reconcileMeta` 的认领 / 补齐 / 等待 / 清理）、学习规则的存取与容量裁剪（`learnedRules`）、DeepSeek 客户端的请求重试策略（`deepseekClient`）。
 - entrypoints 单测：后台消息处理与启动装配（`commandHandlers`、`setup`）。
 - store 单测：事件订阅、元数据联动清理、标签派生。
-- 现状：10 个测试文件 / 66 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
+- 现状：11 个测试文件 / 73 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
 - 每次提交前跑 `pnpm verify`（= typecheck / lint / test:run / build）；`.github/workflows/ci.yml` 在 push 到 master 与 PR 时执行同样四步。
 
 ## 相关文档

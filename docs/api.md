@@ -894,7 +894,8 @@ const key = profileService.urlKeyOf('https://www.example.com/a/');
 | `class AuxDatabase extends Dexie` | `constructor()` | 构造时即 `super('SmartBookmarkAuxDB')` 并注册 v1 schema |
 | 单例 `auxDb` | `new AuxDatabase()` | 直接可用的实例 |
 | `defaultMeta` | `defaultMeta(bookmarkId: string): AuxBookmarkMeta` | 返回 `{ bookmarkId, tags: [], isFavorite: false, visitCount: 0 }` |
-| `sweepOrphanMeta` | `sweepOrphanMeta(validIds: Set<string>): Promise<number>` | **孤儿元数据清扫**：读出全部 `bookmarkMeta`，删掉 `bookmarkId` 不在 `validIds` 中的记录，返回删除条数。0 条时不发删除请求 |
+| `reconcileMeta` | `reconcileMeta(bookmarks: BrowserBookmarkNode[], nowTs = Date.now()): Promise<ReconcileResult>` | **元数据对账**（取代旧版 sweepOrphanMeta，后者已删除）：①书签还在 → 补齐缺失的 `urlKey`；②书签没了但某新节点 `urlKey` 相同且该节点还没有元数据 → **认领**（`bookmarkId` 换成新 id）；③暂时无人认领 → 写入 `orphanedAt` 等待；④超过 `ORPHAN_META_TTL_MS`（90 天）或没有 `urlKey` 的旧数据 → 清理。返回 `{ rebound, backfilled, removed, pending }` |
+| `ORPHAN_META_TTL_MS` | `90 * 24 * 3600_000` | 孤儿元数据等待被认领的时长 |
 | `interface AuxExportData` | 见下 | 导出/导入的数据包 |
 | `exportAuxData` | `exportAuxData(): Promise<AuxExportData>` | 并行导出三张表全部数据 + `chrome.storage.local` 里的学习规则，固定 `version: 1`、`exportedAt: Date.now()` |
 | `importAuxData` | `importAuxData(data: AuxExportData): Promise<void>` | 三张表 `bulkPut` 合并写入（**不覆盖未涉及的记录**）；学习规则按 key 合并、**导入方优先**。`data.version !== 1` 时抛 `Error('Unsupported aux data version')` |
@@ -928,7 +929,7 @@ export interface AuxExportData {
 import {
   auxDb,
   defaultMeta,
-  sweepOrphanMeta,
+  reconcileMeta,
   exportAuxData,
   importAuxData,
 } from '@/lib/auxDatabase';
@@ -938,9 +939,9 @@ import type { AuxExportData } from '@/lib/auxDatabase';
 await auxDb.bookmarkMeta.put({ ...defaultMeta('42'), tags: ['前端'], isFavorite: true });
 const meta = await auxDb.bookmarkMeta.get('42');
 
-// 2) 孤儿元数据清扫（书签已被删除时）
-const removed = await sweepOrphanMeta(new Set(['42']));
-console.log('清理孤儿元数据', removed, '条');
+// 2) 元数据对账（书签增删改后调用）
+const { rebound, removed, pending } = await reconcileMeta(bookmarks);
+console.log('认领', rebound, '条；清理', removed, '条；等待中', pending, '条');
 
 // 3) JSON 备份 / 还原
 const data = await exportAuxData();
@@ -1476,7 +1477,7 @@ console.log(urlAnalyzer.isSameUrl('https://example.com/a/', 'https://www.example
 | 动作 | 签名 | 语义 |
 |---|---|---|
 | `init` | `() => Promise<void>` | 先 `refresh()`，再**只订阅一次**书签事件（模块级 `unsubscribeEvents` 兜底）。事件回调去抖 **150ms**（`EVENT_RELOAD_DEBOUNCE_MS`）后整树重载（`getTree` 毫秒级，可靠性优先）。成功置 `isInitialized: true`；异常写入 `error`；无论成败都会把 `isLoading` 复位。可重复调用（幂等订阅） |
-| `refresh` | `() => Promise<void>` | `loadTree()` → 读全部 `bookmarkMeta` 成 map → `sweepOrphanMeta(validIds)` 清扫孤儿元数据，并从内存 map 里同步删掉对应键 → 写入 `tree`/`bookmarks`/`folders`/`meta` 并清空 `error` |
+| `refresh` | `() => Promise<void>` | `loadTree()` → `reconcileMeta(bookmarks)` 对账（认领可回收的元数据、补齐 `urlKey`、清理真正失效的孤儿）→ 读全部 `bookmarkMeta` 成 map → 写入 `tree`/`bookmarks`/`folders`/`meta` 并清空 `error` |
 | `setSearchQuery` | `(query: string) => void` | — |
 | `setCurrentFolder` | `(folderId?: string) => void` | 同时把 `filter` 复位为 `'all'`、清空 `selectedTag` |
 | `setFilter` | `(filter: BrowserBookmarkFilter, tag?: string) => void` | — |
@@ -1487,7 +1488,7 @@ console.log(urlAnalyzer.isSameUrl('https://example.com/a/', 'https://www.example
 | `updateBookmark` | `(id: string, changes: { title?: string; url?: string }) => Promise<void>` | 直写浏览器后 `refresh()` |
 | `moveBookmarks` | `(ids: string[], parentId: string) => Promise<void>` | 逐个 `moveBookmark`（串行），然后 `refresh()` |
 | `removeBookmarks` | `(ids: string[]) => Promise<void>` | 按 `folders` 判断每个 id 是否为文件夹以选择 `remove`/`removeTree`；随后 `auxDb.bookmarkMeta.bulkDelete(ids)` 删除对应元数据、`refresh()`，并把已删 id 从 `selectedIds` 移除。⚠️ 传文件夹 id 时也会尝试删同名元数据（通常不存在，无副作用） |
-| `removeFolder` | `(folderId: string) => Promise<void>` | `browserBookmarks.remove(folderId, true)` 后 `refresh()`。⚠️ **不会**主动删除子节点的 aux 元数据（由下次 `refresh()` 的 `sweepOrphanMeta` 兜底清理） |
+| `removeFolder` | `(folderId: string) => Promise<void>` | `browserBookmarks.remove(folderId, true)` 后 `refresh()`。⚠️ **不会**主动删除子节点的 aux 元数据（由下次 `refresh()` 的 `reconcileMeta` 兜底：先等待认领，超时才清理） |
 | `createFolder` | `(title: string, parentId?: string) => Promise<void>` | `parentId` 由 service 缺省为书签栏；然后 `refresh()` |
 | `toggleFavorite` | `(id: string) => Promise<void>` | 读 `meta[id] ?? defaultMeta(id)`，取反 `isFavorite` 写 aux，并同步内存 map。**不触发整树重载** |
 | `addTags` | `(ids: string[], tags: string[]) => Promise<void>` | 逐条与现有标签做 `Set` 合并去重，`bulkPut` 后一次性更新内存 map |
@@ -1642,6 +1643,8 @@ applyTheme('light', 'rose' as PrimaryColor);
 // 增强元数据（aux 库 bookmarkMeta 表）
 export interface AuxBookmarkMeta {
   bookmarkId: string;
+  urlKey?: string;            // getUrlKey(url)：节点 id 变化后靠它把元数据认领回来
+  orphanedAt?: number;        // 书签消失后开始等待认领的时间戳（超过 90 天才清理）
   tags: string[];
   notes?: string;
   isFavorite: boolean;
@@ -1688,7 +1691,7 @@ export interface BatchCheckOptions {
 | `@/services/linkHealthService` | `linkHealthService` | `LinkHealthService`（无构造参数） | `classifyLinkStatus`、`nextDomainInterval`、`ensureHostPermissions`、`isCheckableUrl`、`HOST_ORIGINS` |
 | `@/services/organizerService` | `organizerService` | `OrganizerService`（无构造参数） | `isDeepSeekEnabled` |
 | `@/services/profileService` | `profileService` | `ProfileService`（无构造参数） | `ProfileService.urlKeyOf` |
-| `@/lib/auxDatabase` | `auxDb` | `AuxDatabase extends Dexie` | `defaultMeta`、`sweepOrphanMeta`、`exportAuxData`、`importAuxData` |
+| `@/lib/auxDatabase` | `auxDb` | `AuxDatabase extends Dexie` | `defaultMeta`、`reconcileMeta`、`ORPHAN_META_TTL_MS`、`exportAuxData`、`importAuxData` |
 | `@/lib/learnedRules` | — | — | `loadLearnedRules`、`saveLearnedRules`、`clearLearnedRules`、`trimLearnedRules`、`lookupLearnedRule`、`matchLearnedRule`、`LEARNED_RULES_KEY`、`LEARNED_RULES_MAX`、`LEARNED_RULE_CONFIDENCE` |
 | `@/lib/httpChecker` | `httpChecker` | `HttpChecker`（无构造参数） | — |
 | `@/lib/deepseekClient` | — | `DeepSeekClient`（构造参数 `DeepSeekConfig`） | `createDeepSeekClient` |

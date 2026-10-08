@@ -34,6 +34,7 @@ pnpm dev         # Chrome 开发模式，带 HMR
 
 - **书签的增、删、改、移一律走 `src/services/browserBookmarksService.ts`**，也就是 `chrome.bookmarks`。不要新建"书签表"，不要在前端直接拼 `chrome.bookmarks.*` 调用。
 - **只有浏览器书签没有的字段才写 aux 库**（`src/lib/auxDatabase.ts`），并且必须以书签节点 id 关联。新字段加到 `AuxBookmarkMeta`（`src/types/browserBookmarks.ts`），设置页的元数据导出/导入会自动带上。
+- **需要跨"节点 id 变化"存活的字段**（标签、备注这类用户资产）靠 `AuxBookmarkMeta.urlKey` 兜底：`reconcileMeta` 会在书签被重加或换设备同步后按 `urlKey` 把元数据认领回新节点。新增这类字段时不需要额外做什么，但**不要**自己按 id 删除元数据，交给 `reconcileMeta` 统一处理。
 - **写操作之后刷新快照**，不要手改 `browserBookmarkStore` 里的 `tree` / `bookmarks`。浏览器书签事件会去抖触发整树重载，手动改内存只会造成状态错位。
 - **AI 只建议，不执行。** 任何自动整理都必须遵循「生成建议 → 用户预览勾选 → 确认执行」两段式（见 `organizerService.suggest` / `apply`）。
 
@@ -82,7 +83,7 @@ pnpm test:coverage   # v8 覆盖率
 
 配置在 `vitest.config.ts`：环境 `happy-dom`，全局 setup 为 `src/test/setup.ts`，别名 `@` → `src`。
 
-现状：**10 个测试文件 / 66 个用例**。按文件分布：`regressions.test.ts`（22 例，死链判定、并发队列、`httpChecker`、健康报告聚合与 aux 相关回归）、`organizerService`(9)、`browserBookmarksService`(6)、`browserBookmarkStore`(6)、`deepseekClient`(5，请求重试策略)、`learnedRules`(5)、`setup`(4)、`commandHandlers`(3)、`profileService`(3)、`uiStore`(3)。`aiService`（规则引擎）、`deepseekAIService` 与 UI 组件尚无测试，欢迎补。
+现状：**11 个测试文件 / 73 个用例**。按文件分布：`regressions.test.ts`（22 例，死链判定、并发队列、`httpChecker`、健康报告聚合与 aux 相关回归）、`organizerService`(9)、`auxDatabase`(7，元数据对账/认领/清理)、`browserBookmarksService`(6)、`browserBookmarkStore`(6)、`deepseekClient`(5，请求重试策略)、`learnedRules`(5)、`setup`(4)、`commandHandlers`(3)、`profileService`(3)、`uiStore`(3)。`aiService`（规则引擎）、`deepseekAIService` 与 UI 组件尚无测试，欢迎补。
 
 三条实践约定：
 

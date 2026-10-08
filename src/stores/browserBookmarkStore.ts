@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 import { browserBookmarks } from '@/services/browserBookmarksService';
-import { auxDb, defaultMeta, sweepOrphanMeta } from '@/lib/auxDatabase';
+import { auxDb, defaultMeta, reconcileMeta } from '@/lib/auxDatabase';
 import { getUrlKey, now } from '@/lib/utils';
 import type {
   AuxBookmarkMeta,
@@ -113,18 +113,11 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
   refresh: async () => {
     try {
       const snapshot = await browserBookmarks.loadTree();
-      const validIds = new Set(snapshot.bookmarks.map((bookmark) => bookmark.id));
-      const meta = await loadMetaMap();
 
-      // 清理已删除书签的孤儿元数据，并同步内存映射
-      const removedCount = await sweepOrphanMeta(validIds);
-      if (removedCount > 0) {
-        for (const key of Object.keys(meta)) {
-          if (!validIds.has(key)) {
-            delete meta[key];
-          }
-        }
-      }
+      // 先把元数据与书签树对账：认领可回收的（书签被重加/换设备同步）、
+      // 补齐 urlKey、清理真正失效的孤儿；然后再读成 map，避免读到刚被清理的行
+      await reconcileMeta(snapshot.bookmarks);
+      const meta = await loadMetaMap();
 
       set({
         tree: snapshot.tree,

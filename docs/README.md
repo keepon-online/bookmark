@@ -55,7 +55,7 @@ src/
 │   ├── linkHealthService.ts         # 死链检查：并发、限流、进度、报告
 │   └── profileService.ts            # 书签档案：纯计算统计/域名/分类/趋势
 ├── lib/                      # 基础设施
-│   ├── auxDatabase.ts        # Dexie 增强元数据库 + 孤儿清扫 + 导入导出
+│   ├── auxDatabase.ts        # Dexie 增强元数据库 + 元数据对账（urlKey 认领/清理）+ 导入导出
 │   ├── httpChecker.ts        # HTTP 检查器：错误分级、重试、软 404
 │   ├── deepseekClient.ts     # DeepSeek HTTP 客户端（含 SSE 流式解析）
 │   ├── messaging.ts          # 与 background 的类型化消息通道
@@ -92,19 +92,19 @@ pnpm verify         # typecheck + lint + test:run + build 一条龙
 
 | 范围 | 文件 | 总行数 |
 |---|---|---|
-| 全部 `src/` | 102 | 14664 |
-| 其中源码（`*.ts` / `*.tsx`，不含测试） | 85 | 12474 |
-| 其中测试（10 个 `*.test.ts` + `src/test/setup.ts`） | 11 | 2006 |
-| services | 7 | 2775 |
-| components | 36 | 5238 |
-| lib | 9 | 1404 |
-| entrypoints | 22 | 1840 |
-| types | 8 | 721 |
-| stores | 3 | 496 |
+| 全部 `src/` | 103 | 14882 |
+| 其中源码（`*.ts` / `*.tsx`，不含测试） | 85 | 12571 |
+| 其中测试（11 个 `*.test.ts` + `src/test/setup.ts`） | 12 | 2127 |
+| services | 7 | 2758 |
+| components | 36 | 5256 |
+| lib | 9 | 1503 |
+| entrypoints | 22 | 1850 |
+| types | 8 | 715 |
+| stores | 3 | 489 |
 
 > 统计口径：总行数含空行、按 LF 计数，不含 `node_modules`、`.output`、`.wxt`。本表是快照，改动代码后请顺手更新。
 
-测试：**10 个测试文件 / 66 个用例**（`typecheck`、`lint`、`test` 当前全绿）。注意 `src/test/setup.ts` 只提供 chrome mock 与手写的 indexedDB 桩，**用到 Dexie 的测试必须在文件顶部自行 `import 'fake-indexeddb/auto'`**。
+测试：**11 个测试文件 / 73 个用例**（`typecheck`、`lint`、`test` 当前全绿）。注意 `src/test/setup.ts` 只提供 chrome mock 与手写的 indexedDB 桩，**用到 Dexie 的测试必须在文件顶部自行 `import 'fake-indexeddb/auto'`**。
 构建产物：`.output/chrome-mv3` 共 17 个文件 / 633 KB（未压缩目录，`pnpm build` 实测）。
 
 ## 配置
