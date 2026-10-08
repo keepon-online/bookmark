@@ -132,8 +132,9 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 ## 测试策略
 
 - 服务层单测：注入假 `chrome` API（`BookmarksApi` 等）+ `fake-indexeddb`（aux），覆盖树规范化、查重、空文件夹检测、整理建议/应用与学习回流、死链判定与并发队列、健康报告的零查询聚合、自动检查的分片/续跑/让路逻辑、档案计算。
-- 基础库单测：元数据对账（`reconcileMeta` 的认领 / 补齐 / 等待 / 清理）、学习规则的存取与容量裁剪（`learnedRules`）、DeepSeek 客户端的请求重试策略（`deepseekClient`）。
-- entrypoints 单测：后台消息处理与启动装配（`commandHandlers`、`setup`）。
+- 基础库单测：元数据对账（`reconcileMeta` 的认领 / 补齐 / 合并 / 等待 / 清理）、学习规则的存取与容量裁剪（`learnedRules`）、DeepSeek 客户端的请求重试策略（`deepseekClient`）。
+- LLM 编排单测（`deepseekAIService`，注入假客户端）：JSON 解析的健壮性（markdown 围栏、前后缀文本、无法解析时的默认结果）、缓存命中不再请求、成本统计与 30 天裁剪、`batchSize` 收敛、`folderTree` 注入、分批与原索引回填、`fallbackToLocal` 两种语义。
+- entrypoints 单测：后台消息处理与启动装配（`commandHandlers`、`setup`，含自动检查闹钟的分发与启动同步）。
 - store 单测：事件订阅、元数据联动清理、标签派生。
 - 现状：12 个测试文件 / 83 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
 - 每次提交前跑 `pnpm verify`（= typecheck / lint / test:run / build）；`.github/workflows/ci.yml` 在 push 到 master 与 PR 时执行同样四步。

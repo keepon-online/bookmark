@@ -408,7 +408,9 @@ API Key 不存在 `.env`，而是由设置页写入 **`chrome.storage.local` 的
 - 整批 token 按书签**均摊**（`tokensPerItem = ceil(total_tokens / batch.length)`），
   同时更新 `deepseekCostStats`。
 - 批失败时：`fallbackToLocal === true` 才逐条回退本地规则（`reasoning` 为
-  `'LLM批量调用失败，使用本地分类'`）；否则该批结果留空。
+  `'LLM批量调用失败，使用本地分类'`）；否则该批**不写入任何位置**——由于实现是
+  `results[index] = ...` 按位赋值，返回数组可能**短于入参**（中间批成功、首尾批失败时
+  还会出现空洞），**调用方必须按位判空**（`organizerService` 就是这么做的）。
 - 每批结束回调 `onProgress(results.filter(r => r).length, total)`；
   批与批之间 `await delay(500)` 以避免限流。
 
