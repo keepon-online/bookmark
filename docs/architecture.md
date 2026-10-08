@@ -114,7 +114,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 - entrypoints 单测：后台消息处理与启动装配（`commandHandlers`、`setup`）。
 - store 单测：事件订阅、元数据联动清理、标签派生。
 - 现状：10 个测试文件 / 66 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
-- 每次提交前跑 `pnpm typecheck` / `pnpm lint` / `pnpm test -- --run` / `pnpm build`（仓库还没有 CI）。
+- 每次提交前跑 `pnpm verify`（= typecheck / lint / test:run / build）；`.github/workflows/ci.yml` 在 push 到 master 与 PR 时执行同样四步。
 
 ## 相关文档
 

@@ -31,9 +31,10 @@
 ```bash
 pnpm install     # 安装依赖
 pnpm dev         # 开发模式
-pnpm test        # 单元测试
+pnpm test        # 单元测试（监听）
 pnpm build       # 构建
 pnpm zip         # 打包
+pnpm verify      # 提交前自检：typecheck + lint + test + build
 ```
 
 ## 文档
@@ -61,4 +62,4 @@ src/
 
 ## 许可证
 
-MIT
+MIT，见 [LICENSE](./LICENSE)。

@@ -75,7 +75,7 @@ logger.error('失败', error);
 
 ```bash
 pnpm test            # 监听模式
-pnpm test -- --run   # 单次跑完（CI 用法）
+pnpm test:run        # 单次跑完（CI 用法）
 pnpm test:ui         # 浏览器 UI
 pnpm test:coverage   # v8 覆盖率
 ```
@@ -119,10 +119,10 @@ expect(snapshot.bookmarks).toHaveLength(1);
 ## 提交前自检
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm test -- --run && pnpm build
+pnpm verify   # = typecheck && lint && test:run && build
 ```
 
-这四条目前是唯一防线（仓库尚未配置 CI）。任何一条红了都不要提交。
+CI（`.github/workflows/ci.yml`）在 push 到 `master` 与 PR 时会跑同样的四步，本地先跑一遍能省一次往返。任何一步红了都不要提交。
 
 提交信息用约定式前缀：`feat:` / `fix:` / `docs:` / `refactor:` / `perf:` / `test:` / `chore:`，冒号后写中文说明。
 

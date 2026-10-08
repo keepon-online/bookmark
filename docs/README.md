@@ -82,8 +82,10 @@ pnpm zip:firefox
 pnpm typecheck      # tsc --noEmit
 pnpm lint           # eslint
 pnpm test           # vitest（监听模式）
+pnpm test:run       # vitest 单次跑完（CI 用法）
 pnpm test:ui        # vitest UI
 pnpm test:coverage  # 覆盖率（v8）
+pnpm verify         # typecheck + lint + test:run + build 一条龙
 ```
 
 ## 代码规模（截至本次文档整理）
