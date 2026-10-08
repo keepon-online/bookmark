@@ -637,10 +637,13 @@ export interface ScanSettings {
   retries: number;          // 重试次数
   skipRecentHours: number;  // 跳过最近检查过的（小时）
   whitelist: string[];      // 白名单域名（含子域名）
+  autoScanEnabled: boolean; // 定时自动检查开关
+  autoScanIntervalHours: number; // 自动检查间隔（小时）
 }
 
 export const DEFAULT_SCAN_SETTINGS: ScanSettings = {
   timeout: 10, concurrency: 5, retries: 2, skipRecentHours: 24, whitelist: [],
+  autoScanEnabled: false, autoScanIntervalHours: 24,
 };
 export const SCAN_SETTINGS_KEY = 'scan_settings'; // chrome.storage.local 的键，别改
 
@@ -651,6 +654,48 @@ export function toBatchCheckOptions(settings: ScanSettings): BatchCheckOptions; 
 
 `loadScanSettings` 会把读到的值合并到默认值之上（老版本缺字段时也能用），
 读取失败时返回默认值并 `logger.error`。
+
+#### 定时自动检查：`@/services/linkHealthAutoScan`
+
+跑在 Service Worker 里。**分片可续跑**是这里的核心约束：MV3 的 SW 随时可能被杀，
+一口气检查完整库等于把结果赌在"这次不被杀"上，因此每次闹钟只检查一批，进度落
+`chrome.storage.local`，有剩余就安排 1 分钟后的续跑闹钟。
+
+```ts
+export const AUTO_SCAN_ALARM = 'link-health-check';              // 周期闹钟名
+export const AUTO_SCAN_CONTINUE_ALARM = 'link-health-check-continue';
+export const AUTO_SCAN_PROGRESS_KEY = 'linkHealthAutoScanProgress';
+export const AUTO_SCAN_BATCH_SIZE = 40;      // 每批最多检查条数
+export const AUTO_SCAN_STALE_MS = 5 * 60_000; // runningSince 超过此时长视为上次已死
+export const AUTO_SCAN_MIN_INTERVAL_HOURS = 1;
+
+export interface AutoScanProgress {
+  runningSince?: number;   // 仅某批进行中时存在
+  startedAt: number;       // 本轮开始时间
+  checked: number;         // 本轮已检查条数
+  lastFinishedAt?: number; // 最近一次跑完全部候选
+  lastError?: string;      // 最近一次失败原因
+}
+
+export function runAutoScanTick(deps?: Partial<AutoScanDeps>): Promise<AutoScanTickResult>;
+export function syncAutoScanAlarm(settings: ScanSettings): Promise<void>;
+export function ensureAutoScanAlarm(): Promise<void>;  // 读设置后同步（后台启动时用）
+```
+
+| 函数 | 语义 |
+|---|---|
+| `runAutoScanTick` | 跑一批。返回 `{ skipped?, checked, remaining, finished }`；`skipped` 取 `'disabled'`（未开启）或 `'running'`（上一批还在跑、或 `runningSince` 未过期）。没有候选时直接判定本轮结束并写 `lastFinishedAt`；有候选则取前 `AUTO_SCAN_BATCH_SIZE` 条检查，之后清掉"进行中"标记——还有剩余就 `scheduleContinue()`，否则 `clearContinue()` 并记完成时间。单批抛错不丢进度，记入 `lastError` |
+| `syncAutoScanAlarm` | 关掉就 `clear` 两个闹钟；开着则按 `autoScanIntervalHours` 重建周期闹钟（`delayInMinutes` 同间隔，避免开扩展就突发请求）。无 `chrome.alarms` 时直接返回 |
+| `ensureAutoScanAlarm` | `loadScanSettings()` 后调 `syncAutoScanAlarm`，后台启动时调用，保证闹钟与设置不漂移 |
+
+`AutoScanDeps` 把设置读取、书签/元数据加载、实际检查、进度读写、续跑闹钟调度
+与 `now()` 全部做成可注入项，默认接真实实现，测试里逐项替换即可（不需要 chrome
+或 IndexedDB）。
+
+**与手动扫描的关系**：两者共用 `selectCheckableNodes` 的跳过规则，默认 24 小时的
+"跳过最近检查过的"窗口让刚手动扫过的书签不会被自动扫描重复检查。极端情况下
+（手动扫描进行中恰好有闹钟触发）可能重叠少量重复请求，结果一致，因此不做额外的
+跨上下文加锁。
 
 ---
 
@@ -1720,6 +1765,7 @@ export interface BatchCheckOptions {
 | `@/services/linkHealthService` | `linkHealthService` | `LinkHealthService`（无构造参数） | `classifyLinkStatus`、`nextDomainInterval`、`ensureHostPermissions`、`isCheckableUrl`、`HOST_ORIGINS` |
 | `@/services/organizerService` | `organizerService` | `OrganizerService`（无构造参数） | `isDeepSeekEnabled` |
 | `@/services/profileService` | `profileService` | `ProfileService`（无构造参数） | `ProfileService.urlKeyOf` |
+| `@/services/linkHealthAutoScan` | — | — | `runAutoScanTick`、`syncAutoScanAlarm`、`ensureAutoScanAlarm`、`AUTO_SCAN_ALARM`、`AUTO_SCAN_CONTINUE_ALARM`、`AUTO_SCAN_PROGRESS_KEY`、`AUTO_SCAN_BATCH_SIZE`、`AUTO_SCAN_STALE_MS`、`AUTO_SCAN_MIN_INTERVAL_HOURS` |
 | `@/lib/auxDatabase` | `auxDb` | `AuxDatabase extends Dexie` | `defaultMeta`、`reconcileMeta`、`ORPHAN_META_TTL_MS`、`exportAuxData`、`importAuxData` |
 | `@/lib/learnedRules` | — | — | `loadLearnedRules`、`saveLearnedRules`、`clearLearnedRules`、`trimLearnedRules`、`lookupLearnedRule`、`matchLearnedRule`、`LEARNED_RULES_KEY`、`LEARNED_RULES_MAX`、`LEARNED_RULE_CONFIDENCE` |
 | `@/lib/httpChecker` | `httpChecker` | `HttpChecker`（无构造参数） | — |

@@ -27,6 +27,7 @@ import {
   type ScanSettings,
 } from '@/lib/scanSettings';
 import { BrokenLinksPanel } from './BrokenLinksPanel';
+import { syncAutoScanAlarm } from '@/services/linkHealthAutoScan';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('HealthReport');
@@ -118,6 +119,8 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   const handleSettingsChange = (newSettings: ScanSettings) => {
     setScanSettings(newSettings);
     void saveScanSettings(newSettings);
+    // 自动检查的开关与间隔变化要同步到后台闹钟
+    void syncAutoScanAlarm(newSettings);
   };
 
   if (!report) {

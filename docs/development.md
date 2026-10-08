@@ -83,7 +83,7 @@ pnpm test:coverage   # v8 覆盖率
 
 配置在 `vitest.config.ts`：环境 `happy-dom`，全局 setup 为 `src/test/setup.ts`，别名 `@` → `src`。
 
-现状：**11 个测试文件 / 73 个用例**。按文件分布：`regressions.test.ts`（22 例，死链判定、并发队列、`httpChecker`、健康报告聚合与 aux 相关回归）、`organizerService`(9)、`auxDatabase`(7，元数据对账/认领/清理)、`browserBookmarksService`(6)、`browserBookmarkStore`(6)、`deepseekClient`(5，请求重试策略)、`learnedRules`(5)、`setup`(4)、`commandHandlers`(3)、`profileService`(3)、`uiStore`(3)。`aiService`（规则引擎）、`deepseekAIService` 与 UI 组件尚无测试，欢迎补。
+现状：**12 个测试文件 / 82 个用例**。按文件分布：`regressions.test.ts`（23 例，死链判定、并发队列、`httpChecker`、候选筛选、健康报告聚合与 aux 相关回归）、`organizerService`(9)、`auxDatabase`(7，元数据对账/认领/清理)、`linkHealthAutoScan`(7，分片/续跑/让路)、`browserBookmarksService`(6)、`browserBookmarkStore`(6)、`deepseekClient`(5，请求重试策略)、`learnedRules`(5)、`setup`(5)、`commandHandlers`(3)、`profileService`(3)、`uiStore`(3)。`aiService`（规则引擎）、`deepseekAIService` 与 UI 组件尚无测试，欢迎补。
 
 三条实践约定：
 
@@ -157,6 +157,15 @@ git tag v0.7.0 && git push && git push --tags
 ### 死链检查把所有链接都判成"无法连接"
 
 没拿到主机权限。跨源 `fetch` 在没有 `http://*/*`、`https://*/*` 权限时会被 CORS 拦下。检查 `chrome://extensions` → 该扩展 →「网站访问权限」是否为「在所有网站上」；代码入口是 `linkHealthService.ensureHostPermissions()`（必须由用户手势触发，即按钮点击）。未授权时 `httpChecker` 会把结果标为 `blocked` 并**不作为死链**，这是有意设计，别改成误判。
+
+### 定时自动检查没有跑
+
+自动检查默认**关闭**，先在设置页 → 链接健康 → 扫描设置里开启并选间隔。仍不跑时按顺序查：
+
+1. 在 `chrome://extensions` → 该扩展 →「检查视图 service worker」的 Console 里执行 `chrome.alarms.getAll()`，应能看到 `link-health-check`；没有就在设置页改一次开关（会触发 `syncAutoScanAlarm`）
+2. `chrome.storage.local.get('linkHealthAutoScanProgress')`：带 `runningSince` 表示某批正在进行；只有 `lastFinishedAt` 表示本轮已跑完
+3. 若进度里有 `lastError`，多半是权限被撤（结果记为"无法连接"）或上一轮还没跑完（同一时刻只允许一批）
+4. 想看效果不必等到间隔到点：设成 6 小时（下限 1 小时），或在 SW Console 里 `chrome.alarms.create('link-health-check', { delayInMinutes: 1 })` 手动催一次
 
 ### dev 模式下扩展页面连不上开发服务器
 

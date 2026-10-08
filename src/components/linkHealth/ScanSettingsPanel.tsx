@@ -4,8 +4,13 @@
 import * as React from 'react';
 import { Settings, Info } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { cn } from '@/lib/utils';
+import { cn, formatRelativeTime } from '@/lib/utils';
 import type { ScanSettings } from '@/lib/scanSettings';
+import {
+  AUTO_SCAN_BATCH_SIZE,
+  AUTO_SCAN_PROGRESS_KEY,
+  type AutoScanProgress,
+} from '@/services/linkHealthAutoScan';
 
 interface ScanSettingsPanelProps {
   settings: ScanSettings;
@@ -22,11 +27,45 @@ export function ScanSettingsPanel({
 }: ScanSettingsPanelProps) {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [whitelistText, setWhitelistText] = React.useState(settings.whitelist.join('\n'));
+  const [autoScanProgress, setAutoScanProgress] = React.useState<AutoScanProgress | undefined>(
+    undefined
+  );
 
   // 保证异步加载设置后白名单文本框能正确同步
   React.useEffect(() => {
     setWhitelistText(settings.whitelist.join('\n'));
   }, [settings.whitelist]);
+
+  // 读一次自动扫描的进度，展示"进行中 / 上次完成"
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stored = await chrome.storage.local.get(AUTO_SCAN_PROGRESS_KEY);
+        if (!cancelled) {
+          setAutoScanProgress(stored?.[AUTO_SCAN_PROGRESS_KEY] as AutoScanProgress | undefined);
+        }
+      } catch {
+        // 读不到进度不影响设置面板
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const autoScanStatusText = React.useMemo(() => {
+    if (!autoScanProgress) {
+      return '尚未运行过';
+    }
+    if (autoScanProgress.runningSince) {
+      return `正在检查… 本轮已完成 ${autoScanProgress.checked} 条`;
+    }
+    if (autoScanProgress.lastFinishedAt) {
+      return `上次完成：${formatRelativeTime(autoScanProgress.lastFinishedAt)}（本轮 ${autoScanProgress.checked} 条）`;
+    }
+    return `本轮已完成 ${autoScanProgress.checked} 条`;
+  }, [autoScanProgress]);
 
   const handleTimeoutChange = (value: number) => {
     onChange({ ...settings, timeout: value });
@@ -194,6 +233,51 @@ export function ScanSettingsPanel({
         settings.whitelist.length > 0 && React.createElement('div', {
           className: 'text-xs text-muted-foreground',
         }, `已添加 ${settings.whitelist.length} 个域名`)
+      ),
+
+      // 定时自动检查
+      React.createElement('div', { className: 'space-y-2 border-t pt-4' },
+        React.createElement('div', { className: 'flex items-center justify-between' },
+          React.createElement('label', { className: 'text-sm font-medium' }, '定时自动检查'),
+          React.createElement('label', { className: 'flex items-center gap-2 text-sm cursor-pointer select-none' },
+            React.createElement('input', {
+              type: 'checkbox',
+              checked: settings.autoScanEnabled,
+              disabled,
+              onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+                onChange({ ...settings, autoScanEnabled: e.target.checked }),
+              className: 'h-4 w-4',
+            }),
+            settings.autoScanEnabled ? '已开启' : '已关闭'
+          )
+        ),
+        settings.autoScanEnabled && React.createElement('div', { className: 'space-y-2' },
+          React.createElement('div', { className: 'flex items-center justify-between' },
+            React.createElement('label', { className: 'text-sm font-medium' }, '检查间隔'),
+            React.createElement('span', { className: 'text-sm text-muted-foreground tabular-nums' },
+              `${settings.autoScanIntervalHours} 小时`
+            )
+          ),
+          React.createElement('div', { className: 'flex gap-2' },
+            ...[6, 12, 24, 72].map(n =>
+              React.createElement('button', {
+                key: n,
+                onClick: () => onChange({ ...settings, autoScanIntervalHours: n }),
+                disabled,
+                className: cn(
+                  'flex-1 py-1.5 text-xs rounded-md border transition-colors',
+                  settings.autoScanIntervalHours === n
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background hover:bg-muted border-input'
+                ),
+              }, `${n}h`)
+            )
+          ),
+          React.createElement('p', { className: 'text-xs text-muted-foreground' }, autoScanStatusText)
+        ),
+        React.createElement('p', { className: 'text-xs text-muted-foreground' },
+          `后台分批检查（每批最多 ${AUTO_SCAN_BATCH_SIZE} 条，可跨多次闹钟续跑）。需要网站访问权限，未授权时结果会记为「无法连接」而不是失效。`
+        )
       ),
 
       // 提示信息

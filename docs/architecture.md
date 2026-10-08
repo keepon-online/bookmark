@@ -36,7 +36,7 @@ SmartBookmarkAuxDB (Dexie)       ← 增强元数据，按书签节点 id 关联
   - organizeHistory: AI 整理历史
 ```
 
-Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`quick-add`、`toggle-favorite`、`search-bookmarks`）、右键菜单、书签删除事件的元数据对账（`reconcileMeta`：认领可回收的、清理真正失效的）、定时任务占位（`link-health-check`：每 24 小时触发，目前只打日志，尚未接上自动扫描）。消息通道仅保留 `GET_CURRENT_TAB`。
+Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`quick-add`、`toggle-favorite`、`search-bookmarks`）、右键菜单、书签删除事件的元数据对账（`reconcileMeta`：认领可回收的、清理真正失效的）、**定时自动死链检查**（周期闹钟 `link-health-check`，见下方"关键流程"）。消息通道仅保留 `GET_CURRENT_TAB`。
 
 ## 分层职责
 
@@ -46,7 +46,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 |---|---|---|
 | `chrome.bookmarks` | 书签与文件夹树、创建时间、顺序 | 权威数据，绝不可丢 |
 | `SmartBookmarkAuxDB`（IndexedDB / Dexie） | `bookmarkMeta`（标签、备注、收藏、访问次数、死链状态）、`linkChecks`（检查历史）、`organizeHistory`（整理历史） | 可随时重建；丢失只影响增强体验 |
-| `chrome.storage.local` | `deepseekConfig`（API Key、模型、开关）、`deepseekClassificationCache`、`deepseekCostStats`、`learnedDomainRules`（AI 整理回流得到的域名级规则，上限 200，按学习时间淘汰）、`scan_settings`（死链扫描设置） | 配置类，可重设 |
+| `chrome.storage.local` | `deepseekConfig`（API Key、模型、开关）、`deepseekClassificationCache`、`deepseekCostStats`、`learnedDomainRules`（AI 整理回流得到的域名级规则，上限 200，按学习时间淘汰）、`scan_settings`（死链扫描设置，含自动检查开关与间隔）、`linkHealthAutoScanProgress`（自动检查的进度：本轮已检查条数、进行中标记、上次完成时间） | 配置类，可重设 |
 
 ### 状态层
 
@@ -59,7 +59,8 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 |---|---|---|
 | `browserBookmarksService` | `chrome.bookmarks` 薄封装：树规范化、事件订阅、CRUD 透传、按路径确保文件夹、按 urlKey 重复分组、空文件夹检测 | chrome.bookmarks |
 | `organizerService` | AI 整理：`suggest`（只读建议，规则与学习规则先行、仅长尾交 AI）/ `apply`（确认后执行，并把成功应用的高置信度 AI 结果回流为域名规则）/ 历史记录 | 树快照 + chrome.bookmarks + aux + chrome.storage |
-| `linkHealthService` | 死链检查：批次并发、同域自适应限流、进度/停止、健康报告、人工标记豁免 | 树快照 + aux + httpChecker |
+| `linkHealthService` | 死链检查：批次并发、同域自适应限流、进度/停止、健康报告、人工标记豁免；导出 `selectCheckableNodes` 供前台与后台共用 | 树快照 + aux + httpChecker |
+| `linkHealthAutoScan` | 定时自动检查：分片执行（每批最多 40 条）、进度落 storage、续跑闹钟、与设置同步周期闹钟 | 树快照 + aux + linkHealthService + chrome.storage/alarms |
 | `profileService` | 书签档案：纯同步计算（统计、域名分布、分类画像、趋势、组织度评分、收藏家等级） | 树快照 + aux |
 | `aiService` | 本地规则分类引擎（零配置、离线，默认方案） | 无 |
 | `deepseekAIService` | DeepSeek LLM 分类（可选，用户自带 key），含结果缓存与成本统计 | chrome.storage |
@@ -88,6 +89,10 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 
 **死链检查**：`ensureHostPermissions()`（用户手势中申请主机权限）→ 按域名分组、同域串行且间隔自适应（遇 429/503 翻倍退避）→ `httpChecker` 逐个检查并分级 → 结果写 `bookmarkMeta.linkStatus` 与 `linkChecks`。**网络层失败（无任何 HTTP 响应）不判死链**，只有拿到明确 HTTP 错误才标记失效；`linkStatusManual` 的人工标记优先于自动判定。
 
+**定时自动检查**：周期闹钟（默认关，可在设置页开启并选 6/12/24/72 小时间隔）触发 `runAutoScanTick()`。**每次只检查一批（最多 40 条）**：MV3 的 Service Worker 随时会被杀，一口气跑完整库等于把结果赌在"这次不被杀"上。进度写 `chrome.storage.local.linkHealthAutoScanProgress`，还有剩余就安排 1 分钟后的续跑闹钟（`link-health-check-continue`），全部跑完才清掉续跑闹钟。某批中途被杀时 `runningSince` 会留下痕迹，超过 5 分钟视为那次运行已死并允许继续，避免永久卡住。
+
+手动扫描与自动扫描**共用同一套候选筛选**（`selectCheckableNodes`：非 http(s)、白名单、人工标记、跳过窗口），因此刚手动扫过的书签在跳过窗口（默认 24 小时）内不会被自动扫描重复检查；两者共用同一份 `scan_settings`。
+
 ## 元数据生命周期与已知边界
 
 - **创建**：用户打标签/收藏/写备注，或 AI 整理与死链检查写入。
@@ -112,11 +117,11 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 
 ## 测试策略
 
-- 服务层单测：注入假 `chrome` API（`BookmarksApi` 等）+ `fake-indexeddb`（aux），覆盖树规范化、查重、空文件夹检测、整理建议/应用与学习回流、死链判定与并发队列、健康报告的零查询聚合、档案计算。
+- 服务层单测：注入假 `chrome` API（`BookmarksApi` 等）+ `fake-indexeddb`（aux），覆盖树规范化、查重、空文件夹检测、整理建议/应用与学习回流、死链判定与并发队列、健康报告的零查询聚合、自动检查的分片/续跑/让路逻辑、档案计算。
 - 基础库单测：元数据对账（`reconcileMeta` 的认领 / 补齐 / 等待 / 清理）、学习规则的存取与容量裁剪（`learnedRules`）、DeepSeek 客户端的请求重试策略（`deepseekClient`）。
 - entrypoints 单测：后台消息处理与启动装配（`commandHandlers`、`setup`）。
 - store 单测：事件订阅、元数据联动清理、标签派生。
-- 现状：11 个测试文件 / 73 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
+- 现状：12 个测试文件 / 82 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
 - 每次提交前跑 `pnpm verify`（= typecheck / lint / test:run / build）；`.github/workflows/ci.yml` 在 push 到 master 与 PR 时执行同样四步。
 
 ## 相关文档

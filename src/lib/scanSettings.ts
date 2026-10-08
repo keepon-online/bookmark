@@ -15,6 +15,10 @@ export interface ScanSettings {
   retries: number;          // 重试次数
   skipRecentHours: number;  // 跳过最近检查过的 (小时)
   whitelist: string[];      // 白名单域名
+  // 定时自动检查开关（由后台 Service Worker 分片执行）
+  autoScanEnabled: boolean;
+  // 自动检查间隔（小时）
+  autoScanIntervalHours: number;
 }
 
 // 默认设置
@@ -24,6 +28,8 @@ export const DEFAULT_SCAN_SETTINGS: ScanSettings = {
   retries: 2,
   skipRecentHours: 24,
   whitelist: [],
+  autoScanEnabled: false,
+  autoScanIntervalHours: 24,
 };
 
 // 存储键（保持历史值，别改，否则老用户的设置会丢）
