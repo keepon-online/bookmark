@@ -41,6 +41,8 @@ export interface AuxBookmarkMeta {
   lastStatusCode?: number;
   // 最近一次检查的失败原因（软 404/超时等，展示用）
   lastErrorMessage?: string;
+  // 最近一次检查的响应时间（毫秒），报告聚合直接读，免查历史表
+  lastResponseTime?: number;
   // 人工标记为正常：自动扫描不再改判（强制重查除外）
   linkStatusManual?: boolean;
   aiGenerated?: boolean;

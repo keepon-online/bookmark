@@ -1,6 +1,5 @@
 // AI 相关类型定义
 
-export type AIProvider = 'local' | 'openai' | 'claude' | 'deepseek';
 export type ClassificationMethod = 'rule' | 'nlp' | 'hybrid' | 'llm';
 
 // 分类结果
@@ -80,16 +79,6 @@ export type ContentType =
   | 'forum'
   | 'other';
 
-// AI 配置
-export interface AIConfig {
-  provider: AIProvider;
-  enabled: boolean;
-  autoClassify: boolean;
-  autoTagSuggestion: boolean;
-  minConfidence: number; // 最低置信度阈值
-  customRules: ClassificationRule[];
-}
-
 // 学习数据
 export interface LearningData {
   bookmarkId: string;
@@ -152,6 +141,8 @@ export interface BatchClassifyOptions {
   useCache?: boolean; // 是否使用缓存
   onProgress?: (current: number, total: number) => void; // 进度回调
   fallbackToLocal?: boolean; // 失败时是否回退到本地分类
+  // 用户现有文件夹完整路径，AI 分类优先映射到这些目录
+  folderTree?: string[];
 }
 
 // 成本统计

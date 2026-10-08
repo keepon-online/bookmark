@@ -32,14 +32,6 @@ export interface OrganizeOptions {
   handleBroken: 'delete' | 'archive' | 'ignore';
 }
 
-// 整理进度
-export interface OrganizeProgress {
-  stage: 'analyzing' | 'classifying' | 'organizing' | 'sync' | 'cleanup' | 'complete';
-  current: number;
-  total: number;
-  message: string;
-}
-
 // 整理变更
 export interface OrganizeChange {
   bookmarkId: string;
@@ -70,30 +62,6 @@ export interface OrganizeResult {
   timestamp: number;
 }
 
-// 整理预览
-export interface OrganizePreview {
-  changes: OrganizeChange[];
-  summary: {
-    totalChanges: number;
-    newFolders: string[];
-    affectedBookmarks: number;
-    estimatedTime: number;
-  };
-  warnings: string[];
-}
-
-// 书签分组
-export interface BookmarkGroup {
-  id: string;
-  name: string;              // 组名（如 "JavaScript 教程"）
-  bookmarks: Bookmark[];
-  similarity: number;         // 组内相似度 (0-1)
-  suggestedFolder?: string;
-  suggestedTags: string[];
-  commonTags: string[];
-  commonDomain?: string;
-}
-
 // 重复组
 export interface DuplicateGroup {
   id: string;
@@ -118,79 +86,4 @@ export interface OrganizeHistory {
   changes: OrganizeChange[];
   rolledBack?: boolean;
   rolledBackAt?: number;
-}
-
-// 相似度计算结果
-export interface SimilarityResult {
-  bookmark1Id: string;
-  bookmark2Id: string;
-  similarity: number;        // 0-1
-  factors: {
-    url: number;
-    title: number;
-    tags: number;
-    domain: number;
-  };
-  reason: string;
-}
-
-// 聚类结果
-export interface ClusterResult {
-  clusters: BookmarkGroup[];
-  noise: Bookmark[];         // 无法归类的书签
-  silhouetteScore: number;   // 聚类质量评分
-}
-
-// 清理选项
-export interface CleanupOptions {
-  // 删除重复
-  removeDuplicates: boolean;
-
-  // 处理失效链接
-  handleBroken: 'delete' | 'archive' | 'ignore';
-
-  // 归档长期未访问的书签
-  archiveUnused: boolean;
-  unusedDays: number;        // 多少天未访问算作未使用
-
-  // 清理空文件夹
-  removeEmptyFolders: boolean;
-
-  // 清理未使用的标签
-  cleanupUnusedTags: boolean;
-}
-
-// 清理结果
-export interface CleanupResult {
-  removed: number;
-  archived: number;
-  kept: number;
-  invalid: number;
-  emptyFoldersRemoved: number;
-  unusedTagsRemoved: number;
-  errors: string[];
-  duration: number;
-}
-
-// 模式发现结果
-export interface PatternDiscovery {
-  pattern: string;           // URL 模式
-  frequency: number;         // 出现频率
-  suggestedTag: string;      // 建议标签
-  suggestedFolder: string;   // 建议文件夹
-  confidence: number;        // 置信度
-  samples: string[];         // 示例 URL
-}
-
-// 智能建议
-export interface SmartSuggestion {
-  type: 'folder' | 'tag' | 'cleanup' | 'merge';
-  priority: 'high' | 'medium' | 'low';
-  title: string;
-  description: string;
-  action: () => Promise<void>;
-  estimatedImpact: {
-    bookmarksAffected: number;
-    timeSaved: number;
-  };
 }

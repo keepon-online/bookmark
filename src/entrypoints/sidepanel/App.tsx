@@ -24,7 +24,7 @@ import { BrowserBookmarkList } from '@/components/bookmark/BrowserBookmarkList';
 import { BrowserBookmarkForm } from '@/components/bookmark/BrowserBookmarkForm';
 import { useFilteredBookmarks } from '@/components/bookmark/useBookmarkFilter';
 import { useBookmarkEditor } from '@/components/bookmark/useBookmarkEditor';
-import { useBrowserBookmarkStore, selectAllTags, initializeTheme } from '@/stores';
+import { useBrowserBookmarkStore, initializeTheme } from '@/stores';
 import { cn } from '@/lib/utils';
 import type { BrowserTreeNode } from '@/types';
 import '@/styles/globals.css';
@@ -57,19 +57,26 @@ export function App() {
   const editor = useBookmarkEditor();
 
   const filtered = useFilteredBookmarks();
-  const tags = React.useMemo(() => selectAllTags(meta).slice(0, 30), [meta]);
-  const brokenCount = React.useMemo(
-    () =>
-      bookmarks.filter((b) => {
-        const status = meta[b.id]?.linkStatus;
-        return status === 'broken' || status === 'unreachable';
-      }).length,
-    [bookmarks, meta]
-  );
-  const favoriteCount = React.useMemo(
-    () => bookmarks.filter((b) => meta[b.id]?.isFavorite).length,
-    [bookmarks, meta]
-  );
+  // 单趟遍历同时累计标签、失效与收藏计数（替代三趟独立扫描）
+  const { tags, brokenCount, favoriteCount } = React.useMemo(() => {
+    const tagCounts = new Map<string, number>();
+    let broken = 0;
+    let favorite = 0;
+    for (const bookmark of bookmarks) {
+      const record = meta[bookmark.id];
+      if (!record) continue;
+      if (record.linkStatus === 'broken' || record.linkStatus === 'unreachable') broken++;
+      if (record.isFavorite) favorite++;
+      for (const tag of record.tags) {
+        tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+      }
+    }
+    const topTags = [...tagCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }))
+      .slice(0, 30);
+    return { tags: topTags, brokenCount: broken, favoriteCount: favorite };
+  }, [bookmarks, meta]);
 
   // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {

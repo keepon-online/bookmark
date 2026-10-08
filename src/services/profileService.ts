@@ -3,7 +3,6 @@
 // 不落缓存（计算毫秒级），不读旧数据库。
 
 import { now, getDomain, getUrlKey } from '@/lib/utils';
-import { BrowserBookmarksService } from './browserBookmarksService';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 import type {
   BookmarkProfile,
@@ -21,35 +20,84 @@ export interface ProfileInput {
 }
 
 export class ProfileService {
-  // 生成完整档案（纯同步计算）
+  // 生成完整档案（纯同步计算，单趟遍历累计全部指标）
   getProfile(input: ProfileInput): BookmarkProfile {
     const { bookmarks, folders, meta } = input;
 
-    const dates = bookmarks
-      .map((node) => node.dateAdded ?? 0)
-      .filter((date) => date > 0);
-    const collectionStartDate = dates.length > 0 ? Math.min(...dates) : 0;
-    const collectionEndDate = dates.length > 0 ? Math.max(...dates) : 0;
+    let minDate = 0;
+    let maxDate = 0;
+    const yearlyMap = new Map<string, number>();
+    const monthlyMap = new Map<string, number>();
+    const domainCounts = new Map<string, number>();
+    const httpsDomains = new Set<string>();
+    const urlKeyCounts = new Map<string, number>();
+    let httpsCount = 0;
+    const categoryDistribution = {} as Record<BookmarkCategory, number>;
+    for (const category of CATEGORIES) {
+      categoryDistribution[category.id] = 0;
+    }
+    const tagSet = new Set<string>();
+    let folderedCount = 0; // 严格口径：已放入子文件夹（非根目录散落）
+    let folderedLooseCount = 0; // 宽口径：有父级与路径即算（组织度评分用）
+    let taggedCount = 0;
+    let favoriteCount = 0;
+    let brokenCount = 0;
+    let aiGeneratedCount = 0;
+
+    for (const node of bookmarks) {
+      const date = node.dateAdded ?? 0;
+      if (date > 0) {
+        if (minDate === 0 || date < minDate) minDate = date;
+        if (date > maxDate) maxDate = date;
+        const d = new Date(date);
+        const yearKey = `${d.getFullYear()}`;
+        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        yearlyMap.set(yearKey, (yearlyMap.get(yearKey) ?? 0) + 1);
+        monthlyMap.set(monthKey, (monthlyMap.get(monthKey) ?? 0) + 1);
+      }
+
+      const url = node.url ?? '';
+      const domain = url ? getDomain(url) : '';
+      if (url) {
+        domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
+        if (url.startsWith('https://')) {
+          httpsCount++;
+          httpsDomains.add(domain);
+        }
+        const urlKey = getUrlKey(url);
+        urlKeyCounts.set(urlKey, (urlKeyCounts.get(urlKey) ?? 0) + 1);
+      }
+      categoryDistribution[this.categorize(domain, node.title)]++;
+
+      if (node.parentId && node.path) {
+        folderedLooseCount++;
+      }
+      if (node.path && node.path !== '书签栏' && node.path !== '其他书签') {
+        folderedCount++;
+      }
+
+      const record = meta[node.id];
+      if (record?.tags.length) {
+        taggedCount++;
+        record.tags.forEach((tag) => tagSet.add(tag));
+      }
+      if (record?.isFavorite) favoriteCount++;
+      if (record?.linkStatus === 'broken' || record?.linkStatus === 'unreachable') brokenCount++;
+      if (record?.aiGenerated) aiGeneratedCount++;
+    }
+
+    const total = bookmarks.length;
+    const collectionStartDate = minDate;
+    const collectionEndDate = maxDate;
     const collectionDays =
       collectionEndDate > collectionStartDate
         ? Math.ceil((collectionEndDate - collectionStartDate) / 86400_000)
         : 0;
     const months = Math.max(collectionDays / 30, 1);
-    const averagePerMonth = Math.round(bookmarks.length / months);
+    const averagePerMonth = Math.round(total / months);
 
-    // 域名分析
-    const domainCounts = new Map<string, number>();
-    let httpsCount = 0;
-    for (const node of bookmarks) {
-      if (!node.url) continue;
-      const domain = getDomain(node.url);
-      domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
-      if (node.url.startsWith('https')) {
-        httpsCount++;
-      }
-    }
     const uniqueDomains = domainCounts.size;
-    const httpsRatio = bookmarks.length > 0 ? httpsCount / bookmarks.length : 0;
+    const httpsRatio = total > 0 ? httpsCount / total : 0;
 
     const topDomains: DomainStats[] = [...domainCounts.entries()]
       .sort((a, b) => b[1] - a[1])
@@ -57,43 +105,24 @@ export class ProfileService {
       .map(([domain, count]) => ({
         domain,
         count,
-        percentage: count / Math.max(bookmarks.length, 1),
-        isHttps: bookmarks.some((node) => node.url?.startsWith(`https://${domain}`)),
+        percentage: count / Math.max(total, 1),
+        isHttps: httpsDomains.has(domain),
         category: this.categorize(domain, ''),
       }));
 
     // 域名多样性（Shannon 熵归一化）
     let entropy = 0;
     for (const count of domainCounts.values()) {
-      const p = count / Math.max(bookmarks.length, 1);
+      const p = count / Math.max(total, 1);
       entropy -= p * Math.log2(p);
     }
     const domainDiversity = uniqueDomains > 1 ? entropy / Math.log2(uniqueDomains) : 0;
 
-    // 分类分布
-    const categoryDistribution = {} as Record<BookmarkCategory, number>;
-    for (const category of CATEGORIES) {
-      categoryDistribution[category.id] = 0;
-    }
-    for (const node of bookmarks) {
-      const category = this.categorize(getDomain(node.url ?? ''), node.title);
-      categoryDistribution[category]++;
-    }
     const sortedCategories = (Object.entries(categoryDistribution) as Array<[BookmarkCategory, number]>).sort(
       (a, b) => b[1] - a[1]
     );
     const primaryCategory = sortedCategories[0]?.[1] > 0 ? sortedCategories[0][0] : 'other';
 
-    // 时间趋势
-    const yearlyMap = new Map<string, number>();
-    const monthlyMap = new Map<string, number>();
-    for (const date of dates) {
-      const d = new Date(date);
-      const yearKey = `${d.getFullYear()}`;
-      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      yearlyMap.set(yearKey, (yearlyMap.get(yearKey) ?? 0) + 1);
-      monthlyMap.set(monthKey, (monthlyMap.get(monthKey) ?? 0) + 1);
-    }
     const toTrend = (map: Map<string, number>): TrendDataPoint[] => {
       let cumulative = 0;
       return [...map.entries()]
@@ -104,48 +133,37 @@ export class ProfileService {
         });
     };
 
-    // 质量指标
-    const duplicateCount = BrowserBookmarksService.groupDuplicates(bookmarks)
-      .reduce((sum, group) => sum + group.bookmarks.length - 1, 0);
-    let brokenCount = 0;
-    let favoriteCount = 0;
-    let aiGeneratedCount = 0;
-    const tagSet = new Set<string>();
-    for (const node of bookmarks) {
-      const record = meta[node.id];
-      if (!record) continue;
-      if (record.linkStatus === 'broken' || record.linkStatus === 'unreachable') brokenCount++;
-      if (record.isFavorite) favoriteCount++;
-      if (record.aiGenerated) aiGeneratedCount++;
-      record.tags.forEach((tag) => tagSet.add(tag));
+    // 重复书签数 = 每个规范化 URL 分组中多出的份数之和
+    let duplicateCount = 0;
+    for (const count of urlKeyCounts.values()) {
+      if (count > 1) {
+        duplicateCount += count - 1;
+      }
     }
-    const totalTags = tagSet.size;
 
-    // 组织度评分：入夹率 + 打标率 - 重复/失效惩罚
-    const folderedRatio = bookmarks.length > 0
-      ? bookmarks.filter((node) => node.parentId && node.path).length / bookmarks.length
-      : 0;
-    const taggedRatio = bookmarks.length > 0
-      ? bookmarks.filter((node) => (meta[node.id]?.tags.length ?? 0) > 0).length / bookmarks.length
-      : 0;
-    const duplicatePenalty = bookmarks.length > 0 ? Math.min(duplicateCount / bookmarks.length, 0.2) : 0;
-    const brokenPenalty = bookmarks.length > 0 ? Math.min(brokenCount / bookmarks.length, 0.2) : 0;
+    // 组织度评分：入夹率（宽口径，有路径即算）+ 打标率 - 重复/失效惩罚
+    const folderedRatioLoose = total > 0 ? folderedLooseCount / total : 0;
+    const taggedRatio = total > 0 ? taggedCount / total : 0;
+    const duplicatePenalty = total > 0 ? Math.min(duplicateCount / total, 0.2) : 0;
+    const brokenPenalty = total > 0 ? Math.min(brokenCount / total, 0.2) : 0;
     const organizationScore = Math.round(
-      Math.max(0, Math.min(1, folderedRatio * 0.5 + taggedRatio * 0.5 - duplicatePenalty - brokenPenalty)) * 100
+      Math.max(0, Math.min(1, folderedRatioLoose * 0.5 + taggedRatio * 0.5 - duplicatePenalty - brokenPenalty)) * 100
     );
 
     // 收藏家积分与等级
     const collectorScore = Math.round(
-      bookmarks.length + uniqueDomains * 2 + totalTags * 3 + favoriteCount * 5
+      total + uniqueDomains * 2 + tagSet.size * 3 + favoriteCount * 5
     );
     const levelConfig = [...LEVELS].reverse().find((level) => collectorScore >= level.minScore) ?? LEVELS[0];
     const collectorLevel = levelConfig.level as CollectorLevel;
     const collectorTitle = levelConfig.title.zh;
 
     return {
-      totalBookmarks: bookmarks.length,
+      totalBookmarks: total,
       totalFolders: folders.length,
-      totalTags,
+      totalTags: tagSet.size,
+      folderedRate: total > 0 ? Math.round((folderedCount / total) * 100) : 0,
+      taggedRate: total > 0 ? Math.round(taggedRatio * 100) : 0,
       collectionStartDate,
       collectionEndDate,
       collectionDays,

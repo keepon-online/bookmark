@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import 'fake-indexeddb/auto';
 import { auxDb } from '@/lib/auxDatabase';
 import { organizerService } from '@/services/organizerService';
+import { deepSeekAIService } from '@/services/deepseekAIService';
 import type { BrowserBookmarkNode } from '@/types';
 
 function node(id: string, url: string, title: string, parentId = '1'): BrowserBookmarkNode {
@@ -158,5 +159,130 @@ describe('organizerService v2', () => {
     expect(suggestions).toHaveLength(1);
     expect(suggestions[0].suggestedFolderPath).toBeUndefined();
     expect(suggestions[0].suggestedTags.length).toBeGreaterThan(0);
+  });
+
+  it('规则先行：命中项不送 AI，仅长尾交给 DeepSeek 并透传用户目录树', async () => {
+    const batchSpy = vi
+      .spyOn(deepSeekAIService, 'batchClassify')
+      .mockResolvedValue([
+        {
+          suggestedTags: ['技术', '文章'],
+          suggestedFolder: '学习/博客',
+          contentType: 'blog',
+          confidence: 0.9,
+          method: 'llm' as const,
+          reasoning: '技术博客文章',
+        },
+      ] as never);
+
+    (chrome.storage.local.get as Mock).mockImplementation(async (key: string) =>
+      key === 'deepseekConfig'
+        ? { deepseekConfig: { enabled: true, apiKey: 'test-key', model: 'deepseek-chat' } }
+        : {}
+    );
+
+    const suggestions = await organizerService.suggest(
+      [
+        node('20', 'https://github.com/user/repo', 'repo'),
+        node('21', 'https://someblog.example.com/deep-dive', '深度文章'),
+      ],
+      {},
+      { folderPaths: ['开发', '开发/前端', '学习/博客'] }
+    );
+
+    // 只有规则未命中的长尾被送去 AI
+    expect(batchSpy).toHaveBeenCalledTimes(1);
+    const call = batchSpy.mock.calls[0];
+    const aiInputs = call?.[0] ?? [];
+    const aiOptions = call?.[1] ?? {};
+    expect(aiInputs).toHaveLength(1);
+    expect(aiInputs[0].url).toBe('https://someblog.example.com/deep-dive');
+    expect(aiOptions.folderTree).toEqual(['开发', '开发/前端', '学习/博客']);
+
+    // 规则命中走 rule，长尾走 deepseek
+    const byId = new Map(suggestions.map((s) => [s.node.id, s]));
+    expect(byId.get('20')?.engine).toBe('rule');
+    expect(byId.get('20')?.suggestedFolderPath).toBe('开发/代码库');
+    expect(byId.get('21')?.engine).toBe('deepseek');
+    expect(byId.get('21')?.suggestedFolderPath).toBe('学习/博客');
+
+    batchSpy.mockRestore();
+  });
+
+  it('未配置 DeepSeek 时不发起任何 AI 调用', async () => {
+    const batchSpy = vi
+      .spyOn(deepSeekAIService, 'batchClassify')
+      .mockResolvedValue([] as never);
+    // beforeEach 已将 storage.get 置为 {} → 未启用
+
+    await organizerService.suggest([node('22', 'https://anything.example.com/x', 'x')], {});
+
+    expect(batchSpy).not.toHaveBeenCalled();
+    batchSpy.mockRestore();
+  });
+
+  it('AI 高置信度建议应用后固化为域名规则，后续同域名直接走规则', async () => {
+    // 简易存储后端：让 get/set 围绕同一份数据工作
+    const backing: Record<string, unknown> = {
+      deepseekConfig: { enabled: true, apiKey: 'test-key', model: 'deepseek-chat' },
+    };
+    (chrome.storage.local.get as Mock).mockImplementation(async (key: string) =>
+      key in backing ? { [key]: backing[key] } : {}
+    );
+    (chrome.storage.local.set as Mock).mockImplementation(async (items: Record<string, unknown>) => {
+      Object.assign(backing, items);
+    });
+
+    const batchSpy = vi
+      .spyOn(deepSeekAIService, 'batchClassify')
+      .mockResolvedValue([
+        {
+          suggestedTags: ['AI'],
+          suggestedFolder: '技术/AI',
+          contentType: 'article',
+          confidence: 0.92,
+          method: 'llm' as const,
+          reasoning: 'AI 资讯文章',
+        },
+      ] as never);
+
+    // 第一轮：长尾走 AI
+    const first = await organizerService.suggest(
+      [node('30', 'https://ai-news.example.com/llm-post', 'LLM 动态')],
+      {}
+    );
+    expect(first).toHaveLength(1);
+    expect(first[0].engine).toBe('deepseek');
+
+    // 应用（bookmarks mock 供 ensureFolderPath/move）
+    (chrome.bookmarks.getChildren as Mock).mockResolvedValue([]);
+    (chrome.bookmarks.create as Mock).mockImplementation(
+      async (arg: chrome.bookmarks.BookmarkCreateArg) =>
+        ({
+          id: `folder-${arg.title}`,
+          parentId: arg.parentId ?? '1',
+          title: arg.title ?? '',
+          index: 0,
+        }) as chrome.bookmarks.BookmarkTreeNode
+    );
+    (chrome.bookmarks.move as Mock).mockResolvedValue({});
+    await organizerService.apply(first);
+
+    // 固化为域名规则
+    const learned = backing.learnedDomainRules as Record<string, { folder: string }>;
+    expect(learned['ai-news.example.com'].folder).toBe('技术/AI');
+
+    // 第二轮：同域名直接走学习规则，不再调用 AI
+    batchSpy.mockClear();
+    const second = await organizerService.suggest(
+      [node('31', 'https://ai-news.example.com/another-post', '另一篇')],
+      {}
+    );
+    expect(batchSpy).not.toHaveBeenCalled();
+    expect(second).toHaveLength(1);
+    expect(second[0].engine).toBe('rule');
+    expect(second[0].suggestedFolderPath).toBe('技术/AI');
+
+    batchSpy.mockRestore();
   });
 });

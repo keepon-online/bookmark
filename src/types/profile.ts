@@ -64,6 +64,10 @@ export interface BookmarkProfile {
   totalFolders: number;
   totalTags: number;
 
+  // 组织度展示指标（0-100）：入夹率排除直接散落在根目录的书签
+  folderedRate: number;
+  taggedRate: number;
+
   // 时间统计
   collectionStartDate: number;
   collectionEndDate: number;
@@ -102,13 +106,6 @@ export interface BookmarkProfile {
   // 元数据
   generatedAt: number;
   version: string;
-}
-
-// 分享卡片数据
-export interface ShareCardData {
-  nickname?: string;
-  profile: BookmarkProfile;
-  theme: 'light' | 'dark';
 }
 
 // 收藏家等级配置表
@@ -249,17 +246,3 @@ export const CATEGORY_CONFIGS: CategoryConfig[] = [
     keywords: [],
   },
 ];
-
-// 分类颜色映射
-export const CATEGORY_COLORS: Record<BookmarkCategory, string> = {
-  tech: '#3B82F6',
-  learning: '#10B981',
-  tools: '#8B5CF6',
-  social: '#EC4899',
-  news: '#F59E0B',
-  shopping: '#EF4444',
-  entertainment: '#06B6D4',
-  finance: '#22C55E',
-  lifestyle: '#F97316',
-  other: '#6B7280',
-};

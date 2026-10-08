@@ -83,37 +83,4 @@ export interface CheckProgress {
   estimatedRemaining?: number;
 }
 
-// 检查配置
-export interface LinkHealthConfig {
-  // 是否启用
-  enabled: boolean;
-  // 自动检查间隔 (小时)
-  checkInterval: number;
-  // 默认超时 (毫秒)
-  defaultTimeout: number;
-  // 默认重试次数
-  defaultRetries: number;
-  // 并发数
-  concurrency: number;
-  // 批次大小
-  batchSize: number;
-  // 跳过最近检查过的 (小时)
-  skipRecentHours: number;
-}
-
-// 链接历史记录
-export interface LinkCheckHistory {
-  id: string;
-  bookmarkId: string;
-  checks: Array<{
-    status: number;
-    isAccessible: boolean;
-    responseTime: number;
-    checkedAt: number;
-  }>;
-  lastCheckedAt: number;
-  // 健康度 (0-1)
-  healthScore: number;
-  // 变化趋势
-  trend: 'improving' | 'declining' | 'stable';
-}
+// 链接历史记录已由 aux 库 LinkCheckRecord 承担（src/lib/auxDatabase.ts）

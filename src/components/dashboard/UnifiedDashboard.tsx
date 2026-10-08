@@ -45,9 +45,6 @@ export function UnifiedDashboard() {
     trends: true,
   });
 
-  const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
-  const meta = useBrowserBookmarkStore((state) => state.meta);
-
   const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -77,7 +74,7 @@ export function UnifiedDashboard() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await useBrowserBookmarkStore.getState().refresh();
+      // init() 内部会 refresh 全量快照，无需在此重复拉取
       await loadData();
     } finally {
       setIsRefreshing(false);
@@ -88,17 +85,15 @@ export function UnifiedDashboard() {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
 
-  // 组织度维度细分指标计算
+  // 组织度维度细分指标：全部直接读档案（profileService 单趟已算好），
+  // 不再对书签数组做额外扫描
   const healthMetrics = useMemo(() => {
     if (!profile || profile.totalBookmarks === 0) {
       return { folderedRate: 0, taggedRate: 0, healthyRate: 100, duplicateRate: 0 };
     }
-    const folderedCount = bookmarks.filter((b) => b.path && b.path !== '书签栏').length;
-    const taggedCount = bookmarks.filter((b) => (meta[b.id]?.tags.length ?? 0) > 0).length;
-
     return {
-      folderedRate: Math.round((folderedCount / profile.totalBookmarks) * 100),
-      taggedRate: Math.round((taggedCount / profile.totalBookmarks) * 100),
+      folderedRate: profile.folderedRate,
+      taggedRate: profile.taggedRate,
       healthyRate: Math.max(
         0,
         Math.round(((profile.totalBookmarks - profile.brokenCount) / profile.totalBookmarks) * 100)
@@ -108,7 +103,7 @@ export function UnifiedDashboard() {
         Math.round((profile.duplicateCount / profile.totalBookmarks) * 100)
       ),
     };
-  }, [profile, bookmarks, meta]);
+  }, [profile]);
 
   // 加载骨架屏
   if (isLoading) {

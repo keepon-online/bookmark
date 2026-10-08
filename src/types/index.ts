@@ -13,7 +13,6 @@ export type {
   CollectorLevel,
   CollectorLevelConfig,
   DomainStats as ProfileDomainStats,
-  ShareCardData,
   TrendDataPoint,
 } from './profile';
 export { COLLECTOR_LEVELS, CATEGORY_CONFIGS } from './profile';
