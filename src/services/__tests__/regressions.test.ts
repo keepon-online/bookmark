@@ -441,6 +441,12 @@ describe('regressions', () => {
     expect(classifyLinkStatus(403)).toBe('active');
     expect(classifyLinkStatus(408)).toBe('active');
     expect(classifyLinkStatus(429)).toBe('unknown');
+    // CDN/WAF 防护码：能拿到结构化响应说明站点活着，不判死
+    expect(classifyLinkStatus(521)).toBe('unknown');
+    expect(classifyLinkStatus(520)).toBe('unknown');
+    expect(classifyLinkStatus(524)).toBe('unknown');
+    expect(classifyLinkStatus(530)).toBe('unknown');
+    expect(classifyLinkStatus(412)).toBe('unknown');
     expect(classifyLinkStatus(404)).toBe('broken');
     expect(classifyLinkStatus(410)).toBe('broken');
     expect(classifyLinkStatus(503)).toBe('broken');
@@ -454,6 +460,100 @@ describe('regressions', () => {
     expect(nextDomainInterval(500, 200)).toBe(250);
     expect(nextDomainInterval(250, 200)).toBe(250);
     expect(nextDomainInterval(500, 404)).toBe(500);
+  });
+
+  it('WAF 防护码（521）连续多轮不写死，存量 521 误判在新一轮扫描纠偏', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      type: 'basic', ok: false, status: 521, url: 'https://blog.csdn.net/x/article',
+    }));
+
+    const node = makeNode('bookmark-521', 'https://blog.csdn.net/x/article');
+
+    // 两轮扫描都不判死（防护拦截 = 证据不足）
+    await linkHealthService.checkBookmarks([node], { retries: 0 });
+    expect((await auxDb.bookmarkMeta.get('bookmark-521'))?.linkStatus).toBeUndefined();
+    await linkHealthService.checkBookmarks([node], { retries: 0, force: true });
+    expect((await auxDb.bookmarkMeta.get('bookmark-521'))?.linkStatus).toBeUndefined();
+
+    // 人为构造存量误判（旧版本把 521 判成 broken）→ 新一轮扫描降级回待检查
+    const stale = (await auxDb.bookmarkMeta.get('bookmark-521'))!;
+    await auxDb.bookmarkMeta.put({
+      ...stale,
+      linkStatus: 'broken',
+      lastStatusCode: 521,
+    });
+    await linkHealthService.checkBookmarks([node], { retries: 0, force: true });
+    const corrected = await auxDb.bookmarkMeta.get('bookmark-521');
+    expect(corrected?.linkStatus).toBe('pending');
+  });
+
+  it('同域名连续 3 条命中同一 WAF 码后，剩余条目跳过请求且不判死', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      type: 'basic', ok: false, status: 521, url: 'https://blog.csdn.net/a/post',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const nodes = ['a', 'b', 'c', 'd', 'e'].map((p) =>
+      makeNode(`bookmark-waf-${p}`, `https://blog.csdn.net/${p}/post`)
+    );
+
+    const results = await linkHealthService.checkBookmarks(nodes, { retries: 0 });
+
+    // 前三条真实请求触发整域豁免，后两条不再发请求（521 非 broken 判定，无 GET 复核）
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(results).toHaveLength(5);
+    for (const node of nodes) {
+      expect((await auxDb.bookmarkMeta.get(node.id))?.linkStatus).toBeUndefined();
+    }
+    // 豁免条目带防护拦截说明
+    const exempt = await auxDb.bookmarkMeta.get('bookmark-waf-d');
+    expect(exempt?.lastErrorMessage).toContain('防护拦截');
+  });
+
+  it('深度复核：真实导航结论写回 meta，无法得出结论不动状态', async () => {
+    vi.stubGlobal('chrome', {
+      ...(global.chrome as object),
+      tabs: {
+        create: vi.fn().mockResolvedValue({ id: 42 }),
+        get: vi.fn().mockResolvedValue({ id: 42, url: 'https://ok.example.com/page' }),
+        remove: vi.fn().mockResolvedValue({}),
+        onUpdated: {
+          addListener: vi.fn((listener: (tabId: number, changeInfo: { status: string }) => void) => {
+            // 标签页创建后模拟加载完成
+            setTimeout(() => listener(42, { status: 'complete' }), 0);
+          }),
+          removeListener: vi.fn(),
+        },
+      },
+      permissions: {
+        contains: vi.fn().mockResolvedValue(true),
+        request: vi.fn().mockResolvedValue(true),
+      },
+    });
+
+    // 正常加载 → active
+    const okNode = makeNode('bookmark-deep-ok', 'https://ok.example.com/page');
+    await linkHealthService.deepVerify([okNode]);
+    const okMeta = await auxDb.bookmarkMeta.get('bookmark-deep-ok');
+    expect(okMeta?.linkStatus).toBe('active');
+    expect(okMeta?.lastErrorMessage).toContain('深度复核');
+
+    // 浏览器错误页 → broken
+    (global.chrome.tabs.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 42,
+      url: 'chrome-error://chromewebdata/',
+    });
+    const deadNode = makeNode('bookmark-deep-dead', 'https://dead.example.com/x');
+    await linkHealthService.deepVerify([deadNode]);
+    expect((await auxDb.bookmarkMeta.get('bookmark-deep-dead'))?.linkStatus).toBe('broken');
+
+    // 环境不支持 tabs → unknown，不写任何状态
+    vi.stubGlobal('chrome', {
+      permissions: { contains: vi.fn().mockResolvedValue(true) },
+    });
+    const unknownNode = makeNode('bookmark-deep-unknown', 'https://slow.example.com/y');
+    await linkHealthService.deepVerify([unknownNode]);
+    expect(await auxDb.bookmarkMeta.get('bookmark-deep-unknown')).toBeUndefined();
   });
 
   it('非 http/https 协议书签（如 javascript:, chrome:// 等）自动跳过，不发网络请求也不误判', async () => {

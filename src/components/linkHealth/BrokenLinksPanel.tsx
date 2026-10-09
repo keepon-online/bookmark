@@ -1,8 +1,16 @@
 // 失效链接管理面板：检查完成后的处理闭环
-// 列出被判失效/无法连接的书签，支持单条/批量重新检查、打开、删除
+// 列出被判失效/无法连接的书签，支持单条/批量重新检查、深度复核、打开、删除
 
 import * as React from 'react';
-import { AlertCircle, CheckCircle2, ExternalLink, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+  ScanSearch,
+  Trash2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ScrollArea } from '@/components/ui/ScrollArea';
@@ -157,6 +165,28 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
     }
   };
 
+  // 深度复核：开后台标签页真实加载页面，通过 WAF/JS 挑战的完整
+  // 浏览器上下文做终审——fetch 被拦截（52x）的站点适用
+  const [deepVerifyStatus, setDeepVerifyStatus] = React.useState<string | null>(null);
+  const deepVerify = async (ids: string[]) => {
+    if (ids.length === 0 || isWorking) return;
+    setIsWorking(true);
+    try {
+      const idSet = new Set(ids);
+      const nodes = bookmarks.filter((node) => idSet.has(node.id));
+      await linkHealthService.deepVerify(nodes, (done, total, current) => {
+        setDeepVerifyStatus(done < total ? `深度复核 ${done + 1}/${total}：${current}` : null);
+      });
+      await refresh();
+      setSelected(new Set());
+    } catch (error) {
+      logger.error('Deep verify failed', error);
+    } finally {
+      setIsWorking(false);
+      setDeepVerifyStatus(null);
+    }
+  };
+
   // 人工标记为正常：后续自动扫描不再改判
   const markHealthy = async (ids: string[]) => {
     if (ids.length === 0 || isWorking) return;
@@ -225,6 +255,17 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
             variant="outline"
             size="sm"
             className="h-7 text-xs"
+            onClick={() => void deepVerify(selected.size > 0 ? [...selected] : displayedItems.map((n) => n.id))}
+            disabled={actionsDisabled || displayedItems.length === 0}
+            title="用后台标签页真实加载页面做终审——能通过防护/JS 挑战，适合复核被拦截的链接"
+          >
+            <ScanSearch className="h-3 w-3 mr-1" />
+            深度复核{selected.size > 0 ? `所选（${selected.size}）` : '当前分类'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
             onClick={() => void markHealthy(selected.size > 0 ? [...selected] : displayedItems.map((n) => n.id))}
             disabled={actionsDisabled || displayedItems.length === 0}
             title="人工确认这些链接正常，后续自动扫描不再改判"
@@ -244,6 +285,14 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
           </Button>
         </div>
       </div>
+
+      {/* 深度复核进度 */}
+      {deepVerifyStatus && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span className="truncate">{deepVerifyStatus}</span>
+        </div>
+      )}
 
       {/* 分类标签与搜索筛选 */}
       <div className="flex items-center justify-between gap-2 flex-wrap pt-1">

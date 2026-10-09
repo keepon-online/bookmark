@@ -8,15 +8,19 @@
 //   HEAD 返回 404/5xx 但 GET 正常
 // - 404/410 是明确失效，立即标死；其他 4xx/5xx 可能是瞬时故障，
 //   需连续两轮都失效才标死（利用 linkChecks 历史）
+// - CDN/WAF 防护码（520-526/530/412，如 CSDN 的 521）判"拦截"：
+//   能拿到结构化响应说明站点活着，不判死；同域名连续多条命中
+//   同一拦截码则整域豁免，剩余条目跳过请求
 // - 网络层失败（超时/连接失败）不判死：连续多轮无法连接标
 //   unreachable，其余保持原状态，但会更新检查时间（受跳过窗口保护）
 // - 429 限流无法证实资源状态：保持原状态，并对该域名指数退避
 // - 根路径书签（首页）直接用 GET 检查并做软 404 检测——域名过期/停放
 //   时全站返回 200 的出售页
 // - 同域名串行检查并保持间隔，遇到 429/503 自动放大间隔
+// - 深度复核（deepVerify）：后台标签页真实导航终审，通过防护/JS 挑战
 // - 人工"标记为正常"的链接（linkStatusManual）自动扫描不再改判
 
-import { httpChecker } from '@/lib/httpChecker';
+import { httpChecker, type CheckResult } from '@/lib/httpChecker';
 import { auxDb, defaultMeta, type LinkCheckRecord } from '@/lib/auxDatabase';
 import { generateId, getDomain, now, sleep } from '@/lib/utils';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
@@ -29,11 +33,21 @@ const SAME_DOMAIN_INTERVAL_MS = 250;
 const MAX_DOMAIN_INTERVAL_MS = 4000;
 // 连续多少轮网络层失败后标记 unreachable
 const UNREACHABLE_THRESHOLD = 3;
+// 同域名连续多少条命中同一 WAF 拦截码后，认定该站点拒绝本工具，
+// 剩余条目直接按防护拦截处理（不再发请求、不判死）
+const WAF_DOMAIN_STRIKE = 3;
 
 // 状态码 → 判定。401/403/405/408 视为"可达但拒绝/受限"，
 // 不能判为死链（如 Cloudflare 拦截——能回应就说明活着）。
 // 429 是限流：服务器活着但没给出资源状态的证据，判 unknown。
 export type LinkVerdict = 'active' | 'broken' | 'unknown';
+
+// CDN/WAF 防护层拦截码：520-526/530 是 Cloudflare 系边缘错误（如 CSDN
+// 对裸请求回 521），412 是国内 WAF（百度系）安全验证。能拿到这些
+// 结构化响应说明域名与防护层都活着，只是拒绝机器请求——不判死
+export function isWafBlockCode(status: number): boolean {
+  return (status >= 520 && status <= 526) || status === 530 || status === 412;
+}
 
 export function classifyLinkStatus(status: number): LinkVerdict {
   if (status >= 200 && status < 400) {
@@ -44,6 +58,9 @@ export function classifyLinkStatus(status: number): LinkVerdict {
   }
   if (status === 429) {
     return 'unknown';
+  }
+  if (isWafBlockCode(status)) {
+    return 'unknown'; // 防护拦截：资源状态证据不足
   }
   return 'broken';
 }
@@ -113,6 +130,69 @@ function isRootUrl(url: string): boolean {
   }
 }
 
+// 深度复核结论：ok 页面真实加载成功；dead 浏览器报错页；unknown 超时/环境不支持
+export type DeepVerifyOutcome = 'ok' | 'dead' | 'unknown';
+
+// 后台真实导航复核：用 chrome.tabs 开不可见标签页真实加载 URL。
+// 完整浏览器上下文（Cookie、TLS 指纹、JS 挑战）是扩展内 fetch 无法
+// 复制的——WAF 拦截的站点 fetch 拿 52x，真实导航通常正常打开。
+// 加载完成即关标签页；浏览器报错页（chrome-error://）判 dead。
+export async function deepVerifyUrl(url: string, timeoutMs = 15000): Promise<DeepVerifyOutcome> {
+  if (typeof chrome === 'undefined' || !chrome.tabs?.create || !chrome.tabs.onUpdated) {
+    return 'unknown';
+  }
+  return new Promise((resolve) => {
+    let tabId: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let done = false;
+
+    const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+      if (updatedTabId !== tabId || done || changeInfo.status !== 'complete') {
+        return;
+      }
+      // 完成后读最终地址：Chrome 加载失败时标签页停在 chrome-error:// 错误页
+      chrome.tabs
+        .get(updatedTabId)
+        .then((tab) => {
+          finish((tab.url ?? '').startsWith('chrome-error') ? 'dead' : 'ok');
+        })
+        .catch(() => finish('ok'));
+    };
+
+    const cleanup = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      chrome.tabs.onUpdated.removeListener(listener);
+      if (tabId !== undefined) {
+        chrome.tabs.remove(tabId).catch(() => {});
+      }
+    };
+
+    const finish = (outcome: DeepVerifyOutcome) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      cleanup();
+      resolve(outcome);
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs
+      .create({ url, active: false })
+      .then((tab) => {
+        if (!tab?.id) {
+          finish('unknown');
+          return;
+        }
+        tabId = tab.id;
+        timer = setTimeout(() => finish('unknown'), timeoutMs);
+      })
+      .catch(() => finish('unknown'));
+  });
+}
+
 export interface SelectCheckableOptions {
   // 跳过最近检查过的窗口（小时）
   skipRecentHours?: number;
@@ -172,6 +252,11 @@ interface DomainQueue {
   busy: boolean;
   intervalMs: number;
   nextAvailableTime: number;
+  // 同域名连续命中同一 WAF 拦截码的计数
+  wafStrikeCode: number;
+  wafStrikeCount: number;
+  // 达到阈值后置为拦截码：该域名剩余条目跳过实际请求
+  wafBlockedCode: number;
 }
 
 export class LinkHealthService {
@@ -260,6 +345,9 @@ export class LinkHealthService {
         busy: false,
         intervalMs: SAME_DOMAIN_INTERVAL_MS,
         nextAvailableTime: 0,
+        wafStrikeCode: 0,
+        wafStrikeCount: 0,
+        wafBlockedCode: 0,
       }));
       let domainCursor = 0;
 
@@ -301,26 +389,59 @@ export class LinkHealthService {
           try {
             const item = domainQueue.items[domainQueue.next++];
 
-            // 首页书签直接 GET（顺带做域名停放检测），其余用 HEAD
-            const rootCheck = isRootUrl(item.node.url!);
-            let check = await httpChecker.check(item.node.url!, {
-              timeout: options.timeout,
-              retries: options.retries,
-              method: rootCheck ? 'GET' : 'HEAD',
-            });
-            // HEAD 疑似失效 → GET 复核，避免 HEAD 被服务器特殊对待导致误判
-            if (
-              !rootCheck &&
-              !check.networkError &&
-              classifyLinkStatus(check.status) === 'broken'
-            ) {
-              const verified = await httpChecker.check(item.node.url!, {
+            // 同域名连续多条命中同一 WAF 拦截码 → 该站拒绝本工具，
+            // 剩余条目不再发请求，直接按防护拦截处理（不判死、不耗请求）
+            let check: CheckResult;
+            let domainSkipped = false;
+            if (domainQueue.wafBlockedCode) {
+              domainSkipped = true;
+              check = {
+                url: item.node.url!,
+                status: domainQueue.wafBlockedCode,
+                isAccessible: false,
+                responseTime: 0,
+                errorMessage: '站点防护拦截（同域名连续被拒），跳过请求',
+                checkedAt: now(),
+              };
+            } else {
+              // 首页书签直接 GET（顺带做域名停放检测），其余用 HEAD
+              const rootCheck = isRootUrl(item.node.url!);
+              check = await httpChecker.check(item.node.url!, {
                 timeout: options.timeout,
                 retries: options.retries,
-                method: 'GET',
+                method: rootCheck ? 'GET' : 'HEAD',
               });
-              if (!verified.networkError) {
-                check = verified;
+              // HEAD 疑似失效 → GET 复核，避免 HEAD 被服务器特殊对待导致误判
+              if (
+                !rootCheck &&
+                !check.networkError &&
+                classifyLinkStatus(check.status) === 'broken'
+              ) {
+                const verified = await httpChecker.check(item.node.url!, {
+                  timeout: options.timeout,
+                  retries: options.retries,
+                  method: 'GET',
+                });
+                if (!verified.networkError) {
+                  check = verified;
+                }
+              }
+
+              // WAF 拦截码连击计数：同码连续达标即整域豁免；
+              // 拿到健康响应则清零
+              if (!check.networkError && isWafBlockCode(check.status)) {
+                if (domainQueue.wafStrikeCode === check.status) {
+                  domainQueue.wafStrikeCount++;
+                } else {
+                  domainQueue.wafStrikeCode = check.status;
+                  domainQueue.wafStrikeCount = 1;
+                }
+                if (domainQueue.wafStrikeCount >= WAF_DOMAIN_STRIKE) {
+                  domainQueue.wafBlockedCode = check.status;
+                }
+              } else if (!check.networkError && check.status >= 200 && check.status < 400) {
+                domainQueue.wafStrikeCode = 0;
+                domainQueue.wafStrikeCount = 0;
               }
             }
 
@@ -365,8 +486,17 @@ export class LinkHealthService {
               if (verdict === 'active') {
                 newStatus = 'active';
               } else if (verdict === 'unknown') {
-                // 429 限流：无法证实，保持原状态
-                keepStatus = true;
+                // 429 限流 / WAF 防护拦截：无法证实资源状态，保持原状态
+                if (
+                  item.meta?.linkStatus === 'broken' &&
+                  typeof item.meta?.lastStatusCode === 'number' &&
+                  isWafBlockCode(item.meta.lastStatusCode)
+                ) {
+                  // 存量纠偏：历史上被 52x/412 误判为失效的，降级回待检查
+                  newStatus = 'pending';
+                } else {
+                  keepStatus = true;
+                }
               } else {
                 // 404/410 明确失效；其他 4xx/5xx 可能是瞬时故障，
                 // 需要上一轮也是失效才写死
@@ -435,9 +565,12 @@ export class LinkHealthService {
             });
 
             // 同域名请求冷却（遇限流自动放大），设置该域名的下次可用时间戳，
-            // 当前 worker 即可立即转去处理其它可用域名，无需闲置等待
-            domainQueue.intervalMs = nextDomainInterval(domainQueue.intervalMs, check.status);
-            domainQueue.nextAvailableTime = now() + domainQueue.intervalMs;
+            // 当前 worker 即可立即转去处理其它可用域名，无需闲置等待。
+            // 域名豁免跳过的条目没有发请求，不占用冷却
+            if (!domainSkipped) {
+              domainQueue.intervalMs = nextDomainInterval(domainQueue.intervalMs, check.status);
+              domainQueue.nextAvailableTime = now() + domainQueue.intervalMs;
+            }
           } finally {
             domainQueue.busy = false;
           }
@@ -470,6 +603,42 @@ export class LinkHealthService {
       });
     });
     await auxDb.bookmarkMeta.bulkPut(updates);
+  }
+
+  // 深度复核指定书签：逐条用后台真实导航终审（可被 stopCheck 打断）。
+  // 结论写回 meta：ok → active，dead → broken，unknown（超时/不支持）不动状态
+  async deepVerify(
+    nodes: BrowserBookmarkNode[],
+    onProgress?: (done: number, total: number, current: string) => void
+  ): Promise<void> {
+    this.stopRequested = false;
+    for (let i = 0; i < nodes.length; i++) {
+      if (this.stopRequested) {
+        break;
+      }
+      const node = nodes[i];
+      onProgress?.(i, nodes.length, node.title || node.url || '');
+      if (!node.url || !isCheckableUrl(node.url)) {
+        continue;
+      }
+
+      const outcome = await deepVerifyUrl(node.url);
+      if (outcome === 'unknown') {
+        continue;
+      }
+
+      const base = (await auxDb.bookmarkMeta.get(node.id)) ?? defaultMeta(node.id);
+      await auxDb.bookmarkMeta.put({
+        ...base,
+        linkStatus: outcome === 'ok' ? 'active' : 'broken',
+        linkCheckedAt: now(),
+        lastStatusCode: outcome === 'ok' ? 200 : 0,
+        lastErrorMessage:
+          outcome === 'ok' ? '深度复核：真实页面可打开' : '深度复核：真实导航也无法打开',
+        lastResponseTime: 0,
+      });
+    }
+    onProgress?.(nodes.length, nodes.length, '');
   }
 
   // 汇总健康报告（基于内存快照 + aux）
