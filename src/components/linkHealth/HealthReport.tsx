@@ -46,6 +46,9 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   const [progress, setProgress] = React.useState<CheckProgress | null>(null);
   const [scanSettings, setScanSettings] = React.useState<ScanSettings>(DEFAULT_SCAN_SETTINGS);
   const [permissionHint, setPermissionHint] = React.useState(false);
+  // 失效面板操作进行中（深度复核/重查/标记）：与批量检查互斥，
+  // 期间禁用本组件的动作按钮，停止按钮对两者都生效
+  const [panelWorking, setPanelWorking] = React.useState(false);
 
   // 加载报告和设置
   const loadReport = React.useCallback(async () => {
@@ -110,7 +113,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
     }
   };
 
-  // 停止检查
+  // 停止检查（批量检查与深度复核共用 stopCheck，均可中断）
   const handleStop = () => {
     linkHealthService.stopCheck();
   };
@@ -137,7 +140,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
             <Activity className="h-5 w-5" />
             链接健康
           </CardTitle>
-          {isChecking ? (
+          {isChecking || panelWorking ? (
             <Button size="sm" variant="outline" onClick={handleStop}>
               停止
             </Button>
@@ -286,7 +289,11 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
         <ScanSettingsPanel settings={scanSettings} onChange={handleSettingsChange} disabled={isChecking} />
 
         {/* 失效链接管理（有失效/无法连接项时显示） */}
-        <BrokenLinksPanel scanSettings={scanSettings} scanRunning={isChecking} />
+        <BrokenLinksPanel
+          scanSettings={scanSettings}
+          scanRunning={isChecking}
+          onWorkingChange={setPanelWorking}
+        />
       </CardContent>
     </Card>
   );

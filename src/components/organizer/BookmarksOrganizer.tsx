@@ -66,6 +66,9 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
   const [isRollingBack, setIsRollingBack] = React.useState<string | null>(null);
   const [rollbackSuccess, setRollbackSuccess] = React.useState<string | null>(null);
 
+  // 建议生成期间配置变化的作废令牌（见 handleGenerate 与清空 effect）
+  const configVersionRef = React.useRef(0);
+
   React.useEffect(() => {
     void isDeepSeekEnabled().then(setDeepSeekOn);
   }, []);
@@ -73,6 +76,9 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
   // 整理配置（范围/引擎/置信度）变化后旧建议失效：
   // 建议是生成时刻的快照，继续展示会让"应用所选"按旧范围执行
   React.useEffect(() => {
+    // 令牌 +1 让进行中的生成在落地时作废（生成耗时数秒，期间改配置
+    // 的话，effect 的清空会被旧配置的 setSuggestions 覆盖回来）
+    configVersionRef.current += 1;
     setSuggestions(null);
     setExcluded(new Set());
     setResult(null);
@@ -136,16 +142,23 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
     setResult(null);
     setRollbackSuccess(null);
     setError(null);
+    const version = configVersionRef.current;
     try {
       const data = await organizerService.suggest(scopeNodes, meta, {
         minConfidence,
         engine,
         folderPaths,
       });
+      // 生成期间配置变了：丢弃旧配置的结果，别覆盖 effect 的清空
+      if (version !== configVersionRef.current) {
+        return;
+      }
       setSuggestions(data);
       setExcluded(new Set());
     } catch (err) {
-      setError((err as Error).message);
+      if (version === configVersionRef.current) {
+        setError((err as Error).message);
+      }
     } finally {
       setIsGenerating(false);
     }

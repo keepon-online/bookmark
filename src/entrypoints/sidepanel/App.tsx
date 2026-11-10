@@ -35,6 +35,7 @@ export function App() {
   const [isAddOpen, setIsAddOpen] = React.useState(false);
 
   const isInitialized = useBrowserBookmarkStore((state) => state.isInitialized);
+  const storeError = useBrowserBookmarkStore((state) => state.error);
   const isLoading = useBrowserBookmarkStore((state) => state.isLoading);
   const tree = useBrowserBookmarkStore((state) => state.tree);
   const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
@@ -125,6 +126,23 @@ export function App() {
   };
 
   if (!isInitialized) {
+    // init 失败不能永远转圈：展示错误并允许重试
+    if (storeError) {
+      return (
+        <div className="flex-1 flex items-center justify-center bg-background">
+          <div className="flex flex-col items-center gap-2 px-4 text-center">
+            <span className="text-sm text-destructive">加载失败：{storeError}</span>
+            <button
+              type="button"
+              className="text-sm text-primary hover:underline"
+              onClick={() => void useBrowserBookmarkStore.getState().init()}
+            >
+              重试
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-2">

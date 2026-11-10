@@ -22,7 +22,10 @@ export default defineConfig({
       'tabs',
       'activeTab',
       'alarms',
-      'contextMenus'
+      'contextMenus',
+      // favicon：书签图标走浏览器内建 _favicon 端点本地取图，
+      // 避免把全部书签域名批量发给 Google favicon 服务
+      'favicon'
     ],
     optional_host_permissions: [
       'https://*/*',

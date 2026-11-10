@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Heart, CheckCircle2, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { cn, formatRelativeTime, getDomain, getFaviconUrl } from '@/lib/utils';
+import { cn, formatRelativeTime, getDomain, getFaviconUrl, isHttpUrl } from '@/lib/utils';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 
 interface BrowserBookmarkCardProps {
@@ -43,7 +43,12 @@ export function BrowserBookmarkCard({
   const isUnreachable = meta?.linkStatus === 'unreachable';
 
   const handleOpen = () => {
-    window.open(url, '_blank');
+    // 书签 URL 是外部可控数据：非 http(s) 协议（javascript: 等）拒开，
+    // 不把安全性寄托在 CSP 兜底上
+    if (!isHttpUrl(url)) {
+      return;
+    }
+    window.open(url, '_blank', 'noopener');
     onOpen?.();
   };
 

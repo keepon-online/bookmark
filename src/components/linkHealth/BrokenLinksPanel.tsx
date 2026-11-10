@@ -18,7 +18,7 @@ import { useBrowserBookmarkStore } from '@/stores';
 import { linkHealthService, ensureHostPermissions } from '@/services/linkHealthService';
 import type { ScanSettings } from '@/lib/scanSettings';
 import { toBatchCheckOptions } from '@/lib/scanSettings';
-import { cn, formatRelativeTime, getDomain } from '@/lib/utils';
+import { cn, formatRelativeTime, getDomain, isHttpUrl } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('BrokenLinksPanel');
@@ -27,12 +27,14 @@ interface BrokenLinksPanelProps {
   scanSettings: ScanSettings;
   // 全量检查进行中：禁用操作，避免并发写检查结果
   scanRunning?: boolean;
+  // 面板操作（深度复核/重查/标记）进行中上报给父组件做互斥
+  onWorkingChange?: (working: boolean) => void;
   className?: string;
 }
 
 type BrokenCategory = 'all' | 'broken' | 'unreachable' | 'soft404';
 
-export function BrokenLinksPanel({ scanSettings, scanRunning = false, className }: BrokenLinksPanelProps) {
+export function BrokenLinksPanel({ scanSettings, scanRunning = false, onWorkingChange, className }: BrokenLinksPanelProps) {
   const bookmarks = useBrowserBookmarkStore((state) => state.bookmarks);
   const meta = useBrowserBookmarkStore((state) => state.meta);
   const removeBookmarks = useBrowserBookmarkStore((state) => state.removeBookmarks);
@@ -42,6 +44,10 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
   const [isWorking, setIsWorking] = React.useState(false);
   const [activeCategory, setActiveCategory] = React.useState<BrokenCategory>('all');
   const [filterQuery, setFilterQuery] = React.useState('');
+
+  React.useEffect(() => {
+    onWorkingChange?.(isWorking);
+  }, [isWorking, onWorkingChange]);
 
   // 全量检查运行中或本面板操作中，都禁用操作
   const actionsDisabled = scanRunning || isWorking;
@@ -208,6 +214,9 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
     try {
       await removeBookmarks([...selected]);
       setSelected(new Set());
+    } catch (error) {
+      // 删除失败（如书签被浏览器同步占用）不能成为未处理 rejection
+      logger.error('Delete bookmarks failed', error);
     } finally {
       setIsWorking(false);
     }
@@ -290,7 +299,16 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
       {deepVerifyStatus && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
-          <span className="truncate">{deepVerifyStatus}</span>
+          <span className="truncate flex-1">{deepVerifyStatus}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs shrink-0"
+            onClick={() => linkHealthService.stopCheck()}
+            title="中断深度复核（已得出结论的条目保留）"
+          >
+            停止复核
+          </Button>
         </div>
       )}
 
@@ -386,10 +404,11 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, className 
                     className="rounded shrink-0"
                     disabled={actionsDisabled}
                   />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                      {/* 非 http(s) 协议不进 href，避免 javascript: 等书签经锚点执行 */}
                       <a
-                        href={node.url}
+                        href={isHttpUrl(node.url) ? node.url : undefined}
                         target="_blank"
                         rel="noreferrer"
                         className="truncate font-medium hover:text-primary flex items-center gap-1"

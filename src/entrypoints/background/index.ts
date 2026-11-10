@@ -39,7 +39,9 @@ export default defineBackground(() => {
     });
   }
 
-  // 按当前页 URL 切换收藏（写 aux 元数据）
+  // 按当前页 URL 切换收藏（写 aux 元数据）。
+  // 事务内读-改-写：与 UI 侧（侧栏/弹窗）的元数据写入并发时
+  // 不互相整行覆盖
   async function toggleFavoriteByUrl(url: string): Promise<boolean> {
     const snapshot = await browserBookmarks.loadTree();
     const urlKey = getUrlKey(url);
@@ -49,10 +51,12 @@ export default defineBackground(() => {
     if (!node) {
       return false;
     }
-    const meta = (await auxDb.bookmarkMeta.get(node.id)) ?? defaultMeta(node.id);
-    const next = { ...meta, isFavorite: !meta.isFavorite };
-    await auxDb.bookmarkMeta.put(next);
-    return next.isFavorite;
+    return auxDb.transaction('rw', auxDb.bookmarkMeta, async () => {
+      const meta = (await auxDb.bookmarkMeta.get(node.id)) ?? defaultMeta(node.id);
+      const next = { ...meta, isFavorite: !meta.isFavorite };
+      await auxDb.bookmarkMeta.put(next);
+      return next.isFavorite;
+    });
   }
 
   // 对比当前书签树：认领可回收的元数据（书签被重加/换设备同步）并清理真正的孤儿

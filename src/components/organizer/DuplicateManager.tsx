@@ -165,6 +165,11 @@ export function DuplicateManager({ className }: { className?: string }) {
       await removeBookmarks([...toDelete]);
       setGroups(null);
       setToDelete(new Set());
+    } catch (error) {
+      // 删除中断（如书签被其他设备同步删除）不能成为未处理 rejection；
+      // 重扫一次让列表与实际状态对齐
+      console.error('[DuplicateManager] Delete failed:', error);
+      runGrouping();
     } finally {
       setIsDeleting(false);
     }

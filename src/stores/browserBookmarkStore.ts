@@ -61,6 +61,8 @@ interface BrowserBookmarkState {
 // 模块级订阅句柄：多个入口 init 只订阅一次
 let unsubscribeEvents: (() => void) | null = null;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+// 进行中的 refresh（单飞合并用）
+let refreshInFlight: Promise<void> | null = null;
 
 const EVENT_RELOAD_DEBOUNCE_MS = 150;
 
@@ -126,24 +128,35 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
   },
 
   refresh: async () => {
-    try {
-      const snapshot = await browserBookmarks.loadTree();
-
-      // 先把元数据与书签树对账：认领可回收的（书签被重加/换设备同步）、
-      // 补齐 urlKey、清理真正失效的孤儿；然后再读成 map，避免读到刚被清理的行
-      await reconcileMeta(snapshot.bookmarks);
-      const meta = await loadMetaMap();
-
-      set({
-        tree: snapshot.tree,
-        bookmarks: snapshot.bookmarks,
-        folders: snapshot.folders,
-        meta,
-        error: null,
-      });
-    } catch (error) {
-      set({ error: (error as Error).message });
+    // 单飞合并：手动写操作后的 refresh 与事件去抖的 refresh 并发时，
+    // 两个全量快照交错 set 会让慢的旧快照覆盖新数据（删除的书签
+    // "复活"）。并发调用共享同一次执行，语义上等价于"再刷一遍"
+    if (refreshInFlight) {
+      return refreshInFlight;
     }
+    refreshInFlight = (async () => {
+      try {
+        const snapshot = await browserBookmarks.loadTree();
+
+        // 先把元数据与书签树对账：认领可回收的（书签被重加/换设备同步）、
+        // 补齐 urlKey、清理真正失效的孤儿；然后再读成 map，避免读到刚被清理的行
+        await reconcileMeta(snapshot.bookmarks);
+        const meta = await loadMetaMap();
+
+        set({
+          tree: snapshot.tree,
+          bookmarks: snapshot.bookmarks,
+          folders: snapshot.folders,
+          meta,
+          error: null,
+        });
+      } catch (error) {
+        set({ error: (error as Error).message });
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+    return refreshInFlight;
   },
 
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -224,14 +237,15 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
   },
 
   addTags: async (ids, tags) => {
-    const meta = { ...get().meta };
+    // 逐条提交内存：批量循环跨多个 await，一次性 set 循环前拍摄的
+    // 旧快照会覆盖期间 refresh 写入的新 meta
     for (const id of ids) {
-      meta[id] = await mutateMeta(id, (current) => ({
+      const next = await mutateMeta(id, (current) => ({
         ...current,
         tags: [...new Set([...current.tags, ...tags])],
       }));
+      set({ meta: { ...get().meta, [id]: next } });
     }
-    set({ meta });
   },
 
   removeTag: async (id, tag) => {
