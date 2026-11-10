@@ -41,11 +41,14 @@ export class ProfileService {
     // 按结构判定（parentId 是否为根节点 id），不比对根目录标题——
     // 那是浏览器本地化字符串（英文 Chrome 是 "Bookmarks bar"、
     // Firefox 是"书签工具栏"），按标题比对在非中文环境会全量误判。
-    // Chrome 根节点 id 固定（0 虚拟根 / 1 书签栏 / 2 其他书签 / 3 移动），
-    // 再并入树里实际存在的根，双保险
+    // Chrome 根节点 id 固定（0 虚拟根 / 1 书签栏 / 2 其他书签 / 3 移动）；
+    // Firefox 根是 GUID（toolbar________ 等），靠结构兜底——扁平 folders
+    // 里 parentId 不指向任何已知文件夹的即是根（Chrome 指向 '0'、
+    // Firefox 指向 'root________'，都不在 folder ids 里）
+    const folderIds = new Set(folders.map((f) => f.id));
     const rootIds = new Set(['0', '1', '2', '3']);
     for (const folder of folders) {
-      if (folder.parentId === '0') {
+      if (folder.parentId === '0' || !folderIds.has(folder.parentId)) {
         rootIds.add(folder.id);
       }
     }

@@ -2,7 +2,7 @@
 // v0.6：quick-add 直写 chrome.bookmarks；toggle-favorite 通过
 // URL 匹配书签后写 aux 元数据
 
-import { getCurrentPageInfo, getCurrentTab } from '@/lib/messaging';
+import { getCurrentPageInfo, getCurrentTab, openSidePanel as openSidePanelHelper } from '@/lib/messaging';
 
 type TabInfo = Awaited<ReturnType<typeof getCurrentTab>>;
 
@@ -72,9 +72,7 @@ export function createDefaultCommandHandler(
     openSidePanel:
       deps.openSidePanel ??
       (async ({ windowId }) => {
-        if (chrome.sidePanel) {
-          await chrome.sidePanel.open({ windowId });
-        }
+        await openSidePanelHelper(windowId);
       }),
   });
 }

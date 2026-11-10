@@ -3,7 +3,7 @@
 // 快捷键、右键菜单、孤儿元数据清理、定时死链检查（阶段 3）、GET_CURRENT_TAB
 
 import { onMessage, getCurrentPageInfo } from '@/lib/messaging';
-import { browserBookmarks, BOOKMARK_BAR_ID } from '@/services/browserBookmarksService';
+import { browserBookmarks, getBookmarkBarId } from '@/services/browserBookmarksService';
 import { auxDb, defaultMeta, reconcileMeta } from '@/lib/auxDatabase';
 import { getUrlKey } from '@/lib/utils';
 import type { Message, MessageResponse } from '@/types';
@@ -33,7 +33,7 @@ export default defineBackground(() => {
       return null;
     }
     return chrome.bookmarks.create({
-      parentId: BOOKMARK_BAR_ID,
+      parentId: getBookmarkBarId(),
       url: input.url,
       title: input.title,
     });

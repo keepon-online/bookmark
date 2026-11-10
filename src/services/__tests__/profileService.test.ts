@@ -58,10 +58,13 @@ describe('profileService v2', () => {
     expect(barProfile.organizationScore).toBe(0);
 
     // 放进子文件夹后才计入入夹率：占评分 50% 权重 → 50 分
-    // （parentId 指向子文件夹 f1 而非根）
+    // （fixtures 含完整层级：根 root1 → 子文件夹 f1 → 书签）
     const folderedProfile = profileService.getProfile({
       bookmarks: [node('3', 'https://c.example.com', 'C', 3000, '书签栏/开发', 'f1')],
-      folders: [node('f1', '', '开发', 500, '书签栏')],
+      folders: [
+        node('root1', '', '书签栏', 0, '', '0'),
+        node('f1', '', '开发', 500, '书签栏', 'root1'),
+      ],
       meta: {},
     });
     expect(folderedProfile.folderedRate).toBe(100);
@@ -74,6 +77,26 @@ describe('profileService v2', () => {
     const loose = [node('1', 'https://a.example.com', 'A', 1000, 'Bookmarks bar')];
     const profile = profileService.getProfile({ bookmarks: loose, folders: [], meta: {} });
     expect(profile.folderedRate).toBe(0);
+
+    // Firefox：根 id 是 GUID（toolbar________），parent 指向根 GUID 的
+    // 书签同样属于散落，结构兜底（parent 不在任何 folder id 里）应命中
+    const ffFolders = [
+      node('toolbar_____', '', '书签工具栏', 0, '', 'root________'),
+    ];
+    const ffLoose = [
+      { ...node('2', 'https://ff.example.com', 'FF', 2000, '书签工具栏'), parentId: 'toolbar_____' },
+      {
+        ...node('3', 'https://ff2.example.com', 'FF2', 3000, '书签工具栏/开发'),
+        parentId: 'ff-sub',
+      },
+    ];
+    const ffProfile = profileService.getProfile({
+      bookmarks: ffLoose,
+      // 结构兜底要求子文件夹也在 folders 里，否则会被误判为根
+      folders: [...ffFolders, node('ff-sub', '', '开发', 100, '书签工具栏', 'toolbar_____')],
+      meta: {},
+    });
+    expect(ffProfile.folderedRate).toBe(50);
   });
 
   it('空数据不崩溃', () => {

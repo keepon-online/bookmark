@@ -50,3 +50,24 @@ export async function getCurrentPageInfo(): Promise<{
     favicon: tab.favIconUrl,
   };
 }
+
+// 打开扩展侧边栏：Chrome 用 sidePanel API（MV3），Firefox 用
+// sidebarAction.open（MV2，且只能由用户手势上下文触发）。
+// 两者都不可用时静默失败（无侧栏能力的环境）
+export async function openSidePanel(windowId?: number): Promise<void> {
+  const chromeAny = chrome as unknown as {
+    sidePanel?: { open: (options: { windowId?: number }) => Promise<void> };
+    sidebarAction?: { open: () => Promise<void> };
+  };
+  try {
+    if (chromeAny.sidePanel?.open) {
+      await chromeAny.sidePanel.open({ windowId });
+      return;
+    }
+    if (chromeAny.sidebarAction?.open) {
+      await chromeAny.sidebarAction.open();
+    }
+  } catch {
+    // Firefox sidebarAction 在非用户手势上下文会抛错，静默即可
+  }
+}

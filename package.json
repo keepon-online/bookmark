@@ -1,6 +1,7 @@
 {
   "name": "smart-bookmark",
   "version": "0.7.0",
+  "license": "MIT",
   "description": "AI 驱动的智能书签管理插件",
   "type": "module",
   "scripts": {

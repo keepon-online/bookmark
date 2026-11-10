@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { SearchBar } from '@/components/search/SearchBar';
 import { BrowserBookmarkList } from '@/components/bookmark/BrowserBookmarkList';
 import { BrowserBookmarkForm } from '@/components/bookmark/BrowserBookmarkForm';
+import { openSidePanel } from '@/lib/messaging';
 import { useFilteredBookmarks } from '@/components/bookmark/useBookmarkFilter';
 import { useBookmarkEditor } from '@/components/bookmark/useBookmarkEditor';
 import { useBrowserBookmarkStore, initializeTheme } from '@/stores';
@@ -90,6 +91,9 @@ export function App() {
         await useBrowserBookmarkStore.getState().addTags([created.id], value.tags);
       }
     }
+    // 回到"全部"视图时同步重置过滤：否则从"失效/收藏"进入添加再返回，
+    // "全部"按钮高亮而列表仍按旧过滤渲染，新加的健康书签看不到
+    useBrowserBookmarkStore.getState().setFilter('all');
     setCurrentView('all');
   };
 
@@ -194,7 +198,10 @@ export function App() {
           <BrowserBookmarkForm
             folders={editor.folderOptions}
             onSubmit={handleAddBookmark}
-            onCancel={() => setCurrentView('all')}
+            onCancel={() => {
+              useBrowserBookmarkStore.getState().setFilter('all');
+              setCurrentView('all');
+            }}
             className="p-2"
           />
         ) : (
@@ -202,6 +209,7 @@ export function App() {
             bookmarks={filtered}
             meta={meta}
             isLoading={isLoading}
+            isSelectable
             selectedIds={selectedIds}
             onSelect={toggleSelect}
             onFavorite={toggleFavorite}
@@ -227,7 +235,7 @@ export function App() {
             variant="link"
             size="sm"
             className="h-auto p-0 text-xs"
-            onClick={() => chrome.sidePanel?.open?.({ windowId: chrome.windows?.WINDOW_ID_CURRENT })}
+            onClick={() => void openSidePanel(chrome.windows?.WINDOW_ID_CURRENT)}
           >
             打开侧边栏
           </Button>

@@ -16,6 +16,23 @@ export const ROOT_ID = '0';
 export const BOOKMARK_BAR_ID = '1';
 export const OTHER_BOOKMARKS_ID = '2';
 
+// 根节点 id 的跨浏览器缓存：Chrome 根 id 固定（'0'-'3'），Firefox 是
+// GUID（'toolbar________' 等），硬编码 '1' 在 Firefox 上写入必失败。
+// loadTree 每次刷新缓存；未加载过时退回 Chrome 默认值
+const resolvedRootIds: string[] = [];
+
+// 书签栏根（新建书签的默认父级）：优先用解析结果，Firefox 下是第一个根
+export function getBookmarkBarId(): string {
+  return resolvedRootIds[0] ?? BOOKMARK_BAR_ID;
+}
+
+// 全部根节点 id（书签栏/其他书签/移动书签等，用于"不可删/不可选"判定）
+export function getRootIds(): string[] {
+  return resolvedRootIds.length > 0
+    ? [...resolvedRootIds]
+    : [BOOKMARK_BAR_ID, OTHER_BOOKMARKS_ID];
+}
+
 // 浏览器书签事件（规范化后），任何事件都意味着树需要重载
 export type BrowserBookmarkEvent =
   | { kind: 'created'; id: string }
@@ -61,6 +78,12 @@ export class BrowserBookmarksService {
     const [root] = await this.api.getTree();
     if (!root) {
       return { tree: [], bookmarks: [], folders: [] };
+    }
+
+    // 记录顶层子根 id（跨浏览器根解析，见 getBookmarkBarId 注释）
+    resolvedRootIds.length = 0;
+    for (const child of root.children ?? []) {
+      resolvedRootIds.push(child.id);
     }
 
     const tree: BrowserTreeNode[] = [];
@@ -149,14 +172,14 @@ export class BrowserBookmarksService {
     return this.api.create({
       url: input.url,
       title: input.title ?? input.url,
-      parentId: input.parentId ?? BOOKMARK_BAR_ID,
+      parentId: input.parentId ?? getBookmarkBarId(),
     });
   }
 
   // 创建文件夹
   async createFolder(
     title: string,
-    parentId: string = BOOKMARK_BAR_ID
+    parentId: string = getBookmarkBarId()
   ): Promise<chrome.bookmarks.BookmarkTreeNode> {
     return this.api.create({ title, parentId });
   }
@@ -189,7 +212,7 @@ export class BrowserBookmarksService {
   // 按路径确保文件夹存在（逐级查找或创建），返回目标文件夹 id
   async ensureFolderPath(
     segments: string[],
-    rootId: string = BOOKMARK_BAR_ID
+    rootId: string = getBookmarkBarId()
   ): Promise<string> {
     let currentId = rootId;
     for (const segment of segments.filter(Boolean)) {
@@ -275,7 +298,7 @@ export class BrowserBookmarksService {
   // 根节点（书签栏/其他书签）不可删：removeTree 对根必然抛错，
   // 混进结果会让"删除所选"中途失败
   static findEmptyFolders(folders: BrowserBookmarkNode[], bookmarks: BrowserBookmarkNode[]): BrowserBookmarkNode[] {
-    const protectedRoots = new Set([BOOKMARK_BAR_ID, OTHER_BOOKMARKS_ID]);
+    const protectedRoots = new Set(getRootIds());
     const foldersWithBookmarks = new Set(bookmarks.map((b) => b.parentId));
     const foldersWithChildren = new Set(folders.map((f) => f.parentId));
     return folders.filter(

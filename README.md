@@ -19,7 +19,7 @@
 
 ## 技术栈
 
-- **框架**: WXT (Manifest V3)
+- **框架**: WXT（Chrome MV3 / Firefox MV2 双端构建）
 - **前端**: React 18 + TypeScript
 - **状态管理**: Zustand
 - **UI**: Tailwind CSS + Radix UI

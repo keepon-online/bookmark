@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   BrowserBookmarksService,
+  getBookmarkBarId,
+  getRootIds,
   type BookmarksApi,
 } from '@/services/browserBookmarksService';
 import type { BrowserBookmarkNode } from '@/types';
@@ -258,5 +260,69 @@ describe('browserBookmarksService', () => {
     for (const bucket of Object.values(api.listenerBuckets)) {
       expect(bucket.size).toBe(0);
     }
+  });
+
+  it('Firefox 根 id（GUID）动态解析：默认写入/保护根/入夹判定全部跨浏览器', async () => {
+    // 局部节点构造（模块级 urlNode 作用域在 buildTestTree 内）
+    const urlNode = (
+      id: string,
+      parentId: string,
+      title: string,
+      url: string,
+      index: number,
+      dateAdded: number
+    ): chrome.bookmarks.BookmarkTreeNode => ({
+      id, parentId, title, url, index, dateAdded,
+    } as chrome.bookmarks.BookmarkTreeNode);
+    // Firefox 书签树：根是 root________，子根是 GUID
+    const firefoxTree: chrome.bookmarks.BookmarkTreeNode = {
+      id: 'root________',
+      title: '',
+      children: [
+        {
+          id: 'toolbar_____',
+          parentId: 'root________',
+          title: '书签工具栏',
+          index: 0,
+          children: [
+            urlNode('t-b1', 'toolbar_____', '散落', 'https://loose.example.com', 0, 100),
+            {
+              id: 't-folder',
+              parentId: 'toolbar_____',
+              title: '开发',
+              index: 1,
+              children: [],
+            },
+          ],
+        },
+        {
+          id: 'menu________',
+          parentId: 'root________',
+          title: '书签菜单',
+          index: 1,
+          children: [],
+        },
+      ],
+    } as chrome.bookmarks.BookmarkTreeNode;
+
+    const api = createFakeApi(firefoxTree);
+    const service = new BrowserBookmarksService(api);
+
+    const snapshot = await service.loadTree();
+    // 默认父级解析到第一个根（书签工具栏），而非硬编码 '1'
+    expect(getBookmarkBarId()).toBe('toolbar_____');
+    expect(getRootIds()).toEqual(expect.arrayContaining(['toolbar_____', 'menu________']));
+
+    // 新建书签默认落书签工具栏
+    await service.createBookmark({ url: 'https://new.example.com', title: '新' });
+    expect(api.createMock).toHaveBeenCalledWith(
+      expect.objectContaining({ parentId: 'toolbar_____' })
+    );
+
+    // 空的"书签菜单"根不进入空文件夹清理结果（removeTree 对根必抛错）
+    const empty = BrowserBookmarksService.findEmptyFolders(snapshot.folders, snapshot.bookmarks);
+    expect(empty.map((f) => f.id)).not.toContain('menu________');
+    // t-folder 无书签时是合法的空文件夹
+    expect(empty.map((f) => f.id)).toEqual(['t-folder']);
   });
 });
