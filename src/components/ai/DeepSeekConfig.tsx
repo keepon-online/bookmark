@@ -91,28 +91,23 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
   };
 
   // 防抖持久化：apiKey 每次击键都全量写 storage 并重初始化服务
-  // （触发两次全量缓存读），中途关页还会把半截 key 永久写入
+  // （触发两次全量缓存读），中途关页还会把半截 key 永久写入。
+  // 防抖定时器持有的是击键时刻的整份快照——即时保存（开关/模型等）
+  // 必须先作废滞留快照，否则 600ms 后旧快照会把开关弹回禁用
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveConfigDebounced = (newConfig: DeepSeekConfig) => {
-    setConfig(newConfig);
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
-    saveTimerRef.current = setTimeout(() => {
-      void saveConfig(newConfig);
-    }, 600);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, []);
+  const pendingConfigRef = useRef<DeepSeekConfig | null>(null);
+  const latestConfigRef = useRef<DeepSeekConfig | null>(null);
+  latestConfigRef.current = config;
 
   const saveConfig = async (newConfig: DeepSeekConfig) => {
+    // 即时保存：作废滞留的防抖快照，避免旧值覆盖
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      pendingConfigRef.current = null;
+    }
     setConfig(newConfig);
+    latestConfigRef.current = newConfig;
     await chrome.storage.local.set({ deepseekConfig: newConfig });
 
     // 重新初始化服务
@@ -122,6 +117,37 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
 
     onConfigChange?.(newConfig);
   };
+
+  const saveConfigDebounced = (newConfig: DeepSeekConfig) => {
+    setConfig(newConfig);
+    latestConfigRef.current = newConfig;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+    pendingConfigRef.current = newConfig;
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      const pending = pendingConfigRef.current;
+      pendingConfigRef.current = null;
+      if (pending) {
+        void saveConfig(pending);
+      }
+    }, 600);
+  };
+
+  // 卸载冲刷：防抖窗口内离开页面时把最后一份配置落盘，
+  // 否则 apiKey 尾部 ≤600ms 的输入永久丢失
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        const pending = pendingConfigRef.current ?? latestConfigRef.current;
+        if (pending) {
+          void chrome.storage.local.set({ deepseekConfig: pending });
+        }
+      }
+    };
+  }, []);
 
   const testConnection = async () => {
     if (!config.apiKey) {

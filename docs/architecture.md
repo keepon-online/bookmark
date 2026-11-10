@@ -136,7 +136,7 @@ Background（Service Worker）职责收缩为：快捷键（`open-sidepanel`、`
 - LLM 编排单测（`deepseekAIService`，注入假客户端）：JSON 解析的健壮性（markdown 围栏、前后缀文本、无法解析时的默认结果）、缓存命中不再请求、成本统计与 30 天裁剪、`batchSize` 收敛、`folderTree` 注入、分批与原索引回填、`fallbackToLocal` 两种语义。
 - entrypoints 单测：后台消息处理与启动装配（`commandHandlers`、`setup`，含自动检查闹钟的分发与启动同步）。
 - store 单测：事件订阅、元数据联动清理、标签派生。
-- 现状：12 个测试文件 / 83 个用例。`aiService` 规则引擎、`deepseekAIService`、UI 组件尚无覆盖。
+- 现状：14 个测试文件 / 110+ 用例，覆盖服务层、基础库（aux 对账、学习规则、DeepSeek 客户端、utils URL 工具）、LLM 编排、entrypoints 装配与 store；UI 组件尚无覆盖。
 - 每次提交前跑 `pnpm verify`（= typecheck / lint / test:run / build）；`.github/workflows/ci.yml` 在 push 到 master 与 PR 时执行同样四步。
 
 ## 相关文档

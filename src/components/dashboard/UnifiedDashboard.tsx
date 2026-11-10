@@ -91,15 +91,15 @@ export function UnifiedDashboard() {
   // 不再对书签数组做额外扫描
   const healthMetrics = useMemo(() => {
     if (!profile || profile.totalBookmarks === 0) {
-      return { folderedRate: 0, taggedRate: 0, healthyRate: 100, duplicateRate: 0 };
+      return { folderedRate: 0, taggedRate: 0, healthyRate: null as number | null, duplicateRate: 0 };
     }
+    // 健康率分母是"已检查"的书签：未检查既不算正常也不算异常，
+    // 否则全新库显示 100% 而健康报告显示 0%，两处数字打架
+    const checked = profile.healthyCount + profile.brokenCount;
     return {
       folderedRate: profile.folderedRate,
       taggedRate: profile.taggedRate,
-      healthyRate: Math.max(
-        0,
-        Math.round(((profile.totalBookmarks - profile.brokenCount) / profile.totalBookmarks) * 100)
-      ),
+      healthyRate: checked > 0 ? Math.round((profile.healthyCount / checked) * 100) : null,
       duplicateRate: Math.min(
         100,
         Math.round((profile.duplicateCount / profile.totalBookmarks) * 100)
@@ -276,7 +276,9 @@ export function UnifiedDashboard() {
                     </div>
                     <div className="flex justify-between">
                       <span>链接正常率:</span>
-                      <span className="font-medium text-foreground">{healthMetrics.healthyRate}%</span>
+                      <span className="font-medium text-foreground">
+                        {healthMetrics.healthyRate === null ? '—（未检查）' : `${healthMetrics.healthyRate}%`}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span>重复冗余率:</span>
@@ -540,7 +542,7 @@ export function UnifiedDashboard() {
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
-                近12个月
+                最近有收藏的 12 个月
               </button>
             </div>
           }

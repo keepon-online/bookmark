@@ -16,7 +16,12 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 import { useBrowserBookmarkStore } from '@/stores';
-import { linkHealthService, ensureHostPermissions } from '@/services/linkHealthService';
+import {
+  linkHealthService,
+  ensureHostPermissions,
+  isCheckableUrl,
+  isWhitelisted,
+} from '@/services/linkHealthService';
 import type { BrowserBookmarkNode, LinkHealthReport, CheckProgress } from '@/types';
 import { ScanSettingsPanel } from './ScanSettingsPanel';
 import {
@@ -46,15 +51,18 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   const [progress, setProgress] = React.useState<CheckProgress | null>(null);
   const [scanSettings, setScanSettings] = React.useState<ScanSettings>(DEFAULT_SCAN_SETTINGS);
   const [permissionHint, setPermissionHint] = React.useState(false);
+  // 检查启动失败（如撞上另一窗口的扫描锁）对用户可见，
+  // 否则按钮可点但点了无声失败
+  const [actionError, setActionError] = React.useState<string | null>(null);
   // 失效面板操作进行中（深度复核/重查/标记）：与批量检查互斥，
   // 期间禁用本组件的动作按钮，停止按钮对两者都生效
   const [panelWorking, setPanelWorking] = React.useState(false);
 
   // 加载报告和设置
   const loadReport = React.useCallback(async () => {
-    const data = await linkHealthService.getHealthReport(bookmarks, meta);
+    const data = await linkHealthService.getHealthReport(bookmarks, meta, scanSettings.whitelist);
     setReport(data);
-  }, [bookmarks, meta]);
+  }, [bookmarks, meta, scanSettings.whitelist]);
 
   React.useEffect(() => {
     void loadReport();
@@ -66,12 +74,19 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
     await runCheck(toBatchCheckOptions(scanSettings));
   };
 
-  // 只重查待检查项（从未检查或未得出结论），不受跳过窗口限制
+  // 只重查待检查项（从未检查或未得出结论），不受跳过窗口限制。
+  // 白名单域名与非 http(s) 协议书签永远不会被检查，排除后
+  // "待检查"计数才可能清零
   const handleCheckPending = async () => {
     const state = useBrowserBookmarkStore.getState();
+    const whitelistSet = new Set(scanSettings.whitelist.map((d) => d.toLowerCase()));
     const pendingNodes = state.bookmarks.filter((node) => {
       const s = state.meta[node.id]?.linkStatus;
-      return !s || s === 'pending';
+      return (
+        (!s || s === 'pending') &&
+        isCheckableUrl(node.url) &&
+        !isWhitelisted(node.url ?? '', whitelistSet)
+      );
     });
     await runCheck({ ...toBatchCheckOptions(scanSettings), skipRecentHours: 0 }, pendingNodes);
   };
@@ -94,6 +109,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
   ) => {
     setIsChecking(true);
     setPermissionHint(false);
+    setActionError(null);
     try {
       const granted = await ensureHostPermissions();
       setPermissionHint(!granted);
@@ -107,6 +123,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
       onCheckAll?.();
     } catch (error) {
       logger.error('Check all failed', error);
+      setActionError((error as Error).message);
     } finally {
       setIsChecking(false);
       setProgress(null);
@@ -130,7 +147,12 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
     return null;
   }
 
-  const healthPercentage = report.total > 0 ? Math.round((report.healthy / report.total) * 100) : 100;
+  // 健康度分母是"已得出结论"的书签（healthy+broken+unreachable）：
+  // 未检查项既不该当正常（Dashboard 旧口径）也不该当不正常（本组件
+  // 旧口径）——全新库两处数字直接打架；无检查数据时显示 —
+  const checkedCount = report.healthy + report.broken + report.unreachable;
+  const healthPercentage =
+    checkedCount > 0 ? Math.round((report.healthy / checkedCount) * 100) : null;
 
   return (
     <Card className={className}>
@@ -183,6 +205,15 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
               未授予网站访问权限：受 CORS 限制，本次检查中无法访问的链接会保持"待检查"
               （不会误判为失效）。重新点击"检查全部"并在浏览器弹窗中允许即可。
             </span>
+          </div>
+        )}
+
+        {/* 检查启动失败（如撞上另一窗口的扫描锁）——原先只写控制台，
+            按钮看起来像"点了没反应" */}
+        {actionError && (
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 p-3 text-sm text-red-800 dark:text-red-300">
+            <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>检查未能启动：{actionError}</span>
           </div>
         )}
 
@@ -248,24 +279,32 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
         {/* 健康度 */}
         <div className="mt-4 pt-4 border-t">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">健康度</span>
+            <span className="text-sm text-muted-foreground">
+              健康度{checkedCount > 0 && <span className="text-xs">（已检查 {checkedCount} 条）</span>}
+            </span>
             <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  'text-lg font-bold',
-                  healthPercentage >= 80
-                    ? 'text-green-600'
-                    : healthPercentage >= 50
-                      ? 'text-yellow-600'
-                      : 'text-red-600'
-                )}
-              >
-                {healthPercentage}%
-              </span>
-              {healthPercentage >= 80 ? (
-                <TrendingUp className="h-4 w-4 text-green-500" />
+              {healthPercentage === null ? (
+                <span className="text-lg font-bold text-gray-400">—</span>
               ) : (
-                <TrendingDown className="h-4 w-4 text-red-500" />
+                <>
+                  <span
+                    className={cn(
+                      'text-lg font-bold',
+                      healthPercentage >= 80
+                        ? 'text-green-600'
+                        : healthPercentage >= 50
+                          ? 'text-yellow-600'
+                          : 'text-red-600'
+                    )}
+                  >
+                    {healthPercentage}%
+                  </span>
+                  {healthPercentage >= 80 ? (
+                    <TrendingUp className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <TrendingDown className="h-4 w-4 text-red-500" />
+                  )}
+                </>
               )}
             </div>
           </div>

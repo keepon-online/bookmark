@@ -285,7 +285,7 @@ export function DuplicateManager({ className }: { className?: string }) {
                       <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
                       <span className="font-medium truncate">{getDomain(group.url)}</span>
                       <Badge variant="secondary" className="text-xs shrink-0">
-                        {group.bookmarks.length} 条重复
+                        {group.bookmarks.length} 条相同
                       </Badge>
                     </div>
                   </div>

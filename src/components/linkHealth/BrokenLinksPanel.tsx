@@ -147,10 +147,14 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, onWorkingC
     });
   };
 
+  // 操作失败（如撞上另一窗口的扫描锁）对用户可见
+  const [panelError, setPanelError] = React.useState<string | null>(null);
+
   // 重新检查指定书签（强制：忽略跳过窗口与人工标记）
   const recheck = async (ids: string[]) => {
     if (ids.length === 0 || isWorking) return;
     setIsWorking(true);
+    setPanelError(null);
     try {
       const granted = await ensureHostPermissions();
       if (!granted) return;
@@ -166,6 +170,7 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, onWorkingC
       setSelected(new Set());
     } catch (error) {
       logger.error('Recheck failed', error);
+      setPanelError((error as Error).message);
     } finally {
       setIsWorking(false);
     }
@@ -177,6 +182,7 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, onWorkingC
   const deepVerify = async (ids: string[]) => {
     if (ids.length === 0 || isWorking) return;
     setIsWorking(true);
+    setPanelError(null);
     try {
       const idSet = new Set(ids);
       const nodes = bookmarks.filter((node) => idSet.has(node.id));
@@ -187,6 +193,7 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, onWorkingC
       setSelected(new Set());
     } catch (error) {
       logger.error('Deep verify failed', error);
+      setPanelError((error as Error).message);
     } finally {
       setIsWorking(false);
       setDeepVerifyStatus(null);
@@ -295,9 +302,15 @@ export function BrokenLinksPanel({ scanSettings, scanRunning = false, onWorkingC
         </div>
       </div>
 
+      {/* 操作失败提示（如撞上另一窗口的扫描锁） */}
+      {panelError && (
+        <div className="text-xs text-destructive truncate" title={panelError}>
+          操作失败：{panelError}
+        </div>
+      )}
+
       {/* 深度复核进度 */}
-      {deepVerifyStatus && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      {deepVerifyStatus && (        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           <span className="truncate flex-1">{deepVerifyStatus}</span>
           <Button
