@@ -1,5 +1,10 @@
 import { defineConfig } from 'wxt';
 
+// Firefox 走 MV2：WXT 会把 optional_host_permissions（MV3 专属键）直接
+// 删除且不迁移，Firefox 产物会失去全部主机权限，死链检查整体不可用；
+// favicon 权限与 _favicon 端点也是 Chrome 专属。按浏览器差异化声明
+const sharedPermissions = ['bookmarks', 'storage', 'tabs', 'activeTab', 'alarms', 'contextMenus'];
+
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   srcDir: 'src',
@@ -12,25 +17,20 @@ export default defineConfig({
       origin: 'http://127.0.0.1:3000',
     },
   },
-  manifest: {
+  manifest: ({ browser }) => ({
     name: '智能书签',
     description: '浏览器书签增强插件 - 秒级搜索、智能整理、死链检查、书签档案',
     version: '0.7.0',
-    permissions: [
-      'bookmarks',
-      'storage',
-      'tabs',
-      'activeTab',
-      'alarms',
-      'contextMenus',
-      // favicon：书签图标走浏览器内建 _favicon 端点本地取图，
-      // 避免把全部书签域名批量发给 Google favicon 服务
-      'favicon'
-    ],
-    optional_host_permissions: [
-      'https://*/*',
-      'http://*/*'
-    ],
+    ...(browser === 'firefox'
+      ? {
+          permissions: sharedPermissions,
+          // MV2 的可选权限语法：host 匹配模式放 optional_permissions
+          optional_permissions: ['https://*/*', 'http://*/*'],
+        }
+      : {
+          permissions: [...sharedPermissions, 'favicon'],
+          optional_host_permissions: ['https://*/*', 'http://*/*'],
+        }),
     options_ui: {
       page: 'options.html',
       open_in_tab: true
@@ -74,7 +74,7 @@ export default defineConfig({
         description: '搜索书签',
       },
     },
-  },
+  }),
   hooks: {
     'build:manifestGenerated': (wxt, manifest) => {
       // 确保 options_ui 包含 open_in_tab

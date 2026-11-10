@@ -279,10 +279,14 @@ export class HttpChecker {
           await reader.cancel().catch(() => {});
           return false;
         }
+        const readPromise = reader.read();
         const read = await Promise.race([
-          reader.read(),
+          readPromise,
           sleep(remaining).then(() => 'deadline' as const),
         ]);
+        // deadline 落败后底层连接被重置时，read() 会以 rejection 结束：
+        // 结果已不再使用，吞掉避免 unhandled rejection 告警
+        readPromise.catch(() => {});
         if (read === 'deadline') {
           await reader.cancel().catch(() => {});
           return false;

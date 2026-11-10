@@ -1,6 +1,6 @@
 // DeepSeek AI 配置组件
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Key,
@@ -17,6 +17,12 @@ import {
 import { deepSeekAIService } from '@/services';
 import type { DeepSeekConfig, CostStats } from '@/types';
 import { createLogger } from '@/lib/logger';
+
+// 本地时区的 YYYY-MM-DD（与服务端记账口径一致）
+function localDateKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 const logger = createLogger('DeepSeekConfig');
 
@@ -50,10 +56,20 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
     try {
       const stored = await chrome.storage.local.get('deepseekConfig');
       if (stored.deepseekConfig) {
-        setConfig(stored.deepseekConfig);
+        // 合并默认值：旧版本/异常存储缺字段时，range/select 的
+        // value=undefined 会退化成非受控组件
+        const merged: DeepSeekConfig = {
+          apiKey: '',
+          model: 'deepseek-chat',
+          enabled: false,
+          temperature: 0.3,
+          maxTokens: 500,
+          ...stored.deepseekConfig,
+        };
+        setConfig(merged);
         // 初始化服务
-        if (stored.deepseekConfig.enabled) {
-          await deepSeekAIService.initialize(stored.deepseekConfig);
+        if (merged.enabled) {
+          await deepSeekAIService.initialize(merged);
         }
       }
     } catch (error) {
@@ -73,6 +89,27 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
       logger.error('Failed to load stats', error);
     }
   };
+
+  // 防抖持久化：apiKey 每次击键都全量写 storage 并重初始化服务
+  // （触发两次全量缓存读），中途关页还会把半截 key 永久写入
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveConfigDebounced = (newConfig: DeepSeekConfig) => {
+    setConfig(newConfig);
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = setTimeout(() => {
+      void saveConfig(newConfig);
+    }, 600);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, []);
 
   const saveConfig = async (newConfig: DeepSeekConfig) => {
     setConfig(newConfig);
@@ -131,7 +168,7 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
   };
 
   return (
-    <div className={`bg-white rounded-lg shadow-sm p-6 ${className}`}>
+    <div className={`bg-white dark:bg-zinc-900 rounded-lg shadow-sm p-6 ${className}`}>
       {/* 头部 */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -139,7 +176,7 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
             <Sparkles className="w-5 h-5 text-indigo-600" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">DeepSeek AI</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">DeepSeek AI</h3>
             <p className="text-sm text-gray-500">大语言模型驱动的智能分类</p>
           </div>
         </div>
@@ -181,17 +218,17 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
                 type={showApiKey ? 'text' : 'password'}
                 value={config.apiKey}
                 onChange={(e) =>
-                  saveConfig({
+                  saveConfigDebounced({
                     ...config,
                     apiKey: e.target.value,
                   })
                 }
                 placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-zinc-900 dark:border-zinc-700 dark:text-gray-100"
               />
               <button
                 onClick={() => setShowApiKey(!showApiKey)}
-                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 dark:border-zinc-700 dark:hover:bg-zinc-800 dark:text-gray-300"
               >
                 {showApiKey ? '隐藏' : '显示'}
               </button>
@@ -230,7 +267,7 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
           {testResult && (
             <div
               className={`p-3 rounded-lg flex items-center gap-2 ${
-                testResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                testResult.success ? 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
               }`}
             >
               {testResult.success ? (
@@ -312,10 +349,10 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
 
           {/* 成本统计 */}
           {costStats && costStats.classifyCount > 0 && (
-            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded-lg">
               <div className="flex items-center gap-2 mb-3">
                 <DollarSign className="w-5 h-5 text-green-600" />
-                <h4 className="font-medium text-gray-900">成本统计</h4>
+                <h4 className="font-medium text-gray-900 dark:text-gray-100">成本统计</h4>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -345,14 +382,14 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
                 </div>
               </div>
 
-              {/* 今日统计 */}
+              {/* 今日统计：严格匹配本地"今天"，当天无消耗显示 0 而不是旧日数据 */}
               {costStats.dailyStats.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-green-300">
                   <div className="text-sm text-gray-700">
                     今日:{' '}
                     <span className="font-medium">
-                      {costStats.dailyStats[costStats.dailyStats.length - 1].tokens} tokens,
-                      ¥{costStats.dailyStats[costStats.dailyStats.length - 1].cost.toFixed(4)}
+                      {(costStats.dailyStats.find((s) => s.date === localDateKey())?.tokens ?? 0)} tokens,
+                      ¥{(costStats.dailyStats.find((s) => s.date === localDateKey())?.cost ?? 0).toFixed(4)}
                     </span>
                   </div>
                 </div>
@@ -361,12 +398,12 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
           )}
 
           {/* 缓存管理 */}
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-lg">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Database className="w-5 h-5 text-blue-600" />
                 <div>
-                  <div className="font-medium text-gray-900">分类缓存</div>
+                  <div className="font-medium text-gray-900 dark:text-gray-100">分类缓存</div>
                   <div className="text-xs text-gray-600">
                     {cacheSize} 个缓存条目
                   </div>
@@ -383,7 +420,7 @@ export function DeepSeekConfig({ className = '', onConfigChange }: DeepSeekConfi
           </div>
 
           {/* 提示信息 */}
-          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-2">
+          <div className="p-3 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 rounded-lg flex items-start gap-2">
             <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
             <div className="text-sm text-yellow-800">
               <p className="font-medium mb-1">使用须知</p>

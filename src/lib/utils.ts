@@ -73,15 +73,29 @@ export function getDomain(url: string): string {
 // 才允许进入 window.open 与 <a href>，javascript: 等协议直接拒开
 export function isHttpUrl(url: string | undefined): boolean {
   if (!url) return false;
-  return /^https?:\/\//i.test(url);
+  return /^https?:\/\//i.test(url.trim());
+}
+
+// 扩展环境且 manifest 声明了 favicon 权限时，_favicon 端点才可用。
+// Firefox 也有 runtime.getURL 但没有该端点，仅凭 API 存在性会误判
+function hasLocalFaviconEndpoint(): boolean {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.getURL) {
+    return false;
+  }
+  try {
+    const manifest = chrome.runtime.getManifest();
+    return (manifest.permissions ?? []).includes('favicon');
+  } catch {
+    return false;
+  }
 }
 
 // 获取 favicon URL。
-// 扩展环境用 Chrome 内建的 _favicon 端点本地取图——把每个书签的域名
-// 发给 Google favicon 服务等于打开侧栏就上报整个书签库的域名集合。
-// 非扩展环境（测试）退回 Google 源
+// 本地端点取图——把每个书签的域名发给 Google favicon 服务等于
+// 打开侧栏就上报整个书签库的域名集合。非支持环境（测试/Firefox）
+// 退回 Google 源
 export function getFaviconUrl(url: string, size = 32): string {
-  if (typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
+  if (hasLocalFaviconEndpoint()) {
     return `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&sz=${size}`;
   }
   const domain = getDomain(url);
