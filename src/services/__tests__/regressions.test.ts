@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import 'fake-indexeddb/auto';
 import { auxDb } from '@/lib/auxDatabase';
 import { httpChecker } from '@/lib/httpChecker';
@@ -37,6 +37,11 @@ describe('regressions', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    // 防御性重置 storage mock 实现：锁/互斥用例会按用例覆盖，
+    // 用例失败时其自定义实现会泄漏到后续用例
+    (chrome.storage.local.get as Mock).mockImplementation(async () => ({}));
+    (chrome.storage.local.set as Mock).mockImplementation(async () => {});
+    (chrome.storage.local.remove as Mock).mockImplementation(async () => {});
     localStorage.clear();
     await auxDb.delete();
     await auxDb.open();
@@ -560,16 +565,55 @@ describe('regressions', () => {
     expect(legacy.pending).toBe(1);
   });
 
+  it('域名豁免的合成 52x 不覆盖真实状态码：真 404 死链不被降级出失效面板', async () => {
+    // n1-n3 连续 521 触发整域豁免；victim 是真 404
+    const mk = (id: string, path: string) => makeNode(id, `https://waf-mix.example.com/${path}`);
+    const wafNodes = [mk('mix-1', 'w1'), mk('mix-2', 'w2'), mk('mix-3', 'w3')];
+    const victim = mk('mix-victim', 'real404');
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/real404')) {
+        return { type: 'basic', ok: false, status: 404, url };
+      }
+      return { type: 'basic', ok: false, status: 521, url };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 第一轮：victim 先查（真 404 → 立即标死），其后三条 521 攒满 strike
+    await linkHealthService.checkBookmarks([victim, ...wafNodes], { retries: 0 });
+    const after1 = await auxDb.bookmarkMeta.get('mix-victim');
+    expect(after1?.linkStatus).toBe('broken');
+    expect(after1?.lastStatusCode).toBe(404);
+
+    // 第二/三轮：victim 排在 strike 之后被豁免（合成 52x）——
+    // 真实状态码必须保留，否则下一轮"存量纠偏"会把 broken 降级 pending
+    for (let round = 2; round <= 3; round++) {
+      await linkHealthService.checkBookmarks([...wafNodes, victim], {
+        retries: 0,
+        force: true,
+      });
+      const meta = await auxDb.bookmarkMeta.get('mix-victim');
+      expect(meta?.linkStatus).toBe('broken');
+      expect(meta?.lastStatusCode).toBe(404);
+    }
+  });
+
   it('跨上下文扫描锁：他人持有且未过期时拒绝，过期或释放后放行', async () => {
     const node = makeNode('bookmark-xlock', 'https://xlock.example.com/page');
+    // 状态化 storage mock：锁的写-复核-释放闭环需要 get/set/remove 真实联动
+    const store: Record<string, unknown> = {};
+    const LOCK = 'linkHealthScanLock';
+    (chrome.storage.local.get as Mock).mockImplementation(async (key: string) =>
+      key in store ? { [key]: store[key] } : {}
+    );
+    (chrome.storage.local.set as Mock).mockImplementation(async (items: Record<string, unknown>) => {
+      Object.assign(store, items);
+    });
+    (chrome.storage.local.remove as Mock).mockImplementation(async (key: string) => {
+      delete store[key];
+    });
 
     // 他人持有未过期的锁 → 拒绝
-    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockImplementation(
-      async (key: string) =>
-        key === 'linkHealthScanLock'
-          ? { linkHealthScanLock: { owner: 'other-context', since: Date.now() } }
-          : {}
-    );
+    store[LOCK] = { owner: 'other-context', since: Date.now() };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       type: 'basic', ok: true, status: 200, url: 'https://xlock.example.com/page',
     }));
@@ -577,22 +621,18 @@ describe('regressions', () => {
       linkHealthService.checkBookmarks([node], { retries: 0 })
     ).rejects.toThrow('另一个窗口正在检查');
 
-    // 锁已过期（TTL 之外）→ 放行并正常完成
-    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockImplementation(
-      async (key: string) =>
-        key === 'linkHealthScanLock'
-          ? { linkHealthScanLock: { owner: 'other-context', since: Date.now() - 91 * 60_000 } }
-          : {}
-    );
+    // 锁已过期（TTL 10 分钟之外）→ 抢占并正常完成
+    store[LOCK] = { owner: 'other-context', since: Date.now() - 11 * 60_000 };
     const results = await linkHealthService.checkBookmarks([node], { retries: 0 });
     expect(results).toHaveLength(1);
-    // 完成后锁被释放（remove 被调用或锁不再属于他人）
     expect((await auxDb.bookmarkMeta.get('bookmark-xlock'))?.linkStatus).toBe('active');
+    // 完成后锁被释放
+    expect(store[LOCK]).toBeUndefined();
 
     // 恢复默认 storage mock，避免实现泄漏到后续用例
-    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockImplementation(
-      async () => ({})
-    );
+    (chrome.storage.local.get as Mock).mockImplementation(async () => ({}));
+    (chrome.storage.local.set as Mock).mockImplementation(async () => {});
+    (chrome.storage.local.remove as Mock).mockImplementation(async () => {});
   });
 
   it('深度复核与批量检查互斥：任一进行中另一方直接抛错', async () => {

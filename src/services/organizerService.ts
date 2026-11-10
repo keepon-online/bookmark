@@ -371,19 +371,23 @@ export class OrganizerService {
           }
         }
 
-        // 2. 如果添加过标签，从 auxDb 移除本次添加的标签
+        // 2. 如果添加过标签，从 auxDb 移除本次添加的标签。
+        //    事务内读-改-写：get 与 put 之间并发扫描的字段级写
+        //    （linkStatus 等）不被整行快照回滚
         if (change.tags?.added && change.tags.added.length > 0) {
           try {
-            const meta = await auxDb.bookmarkMeta.get(change.bookmarkId);
-            if (meta) {
-              const addedSet = new Set(change.tags.added);
-              const remainingTags = meta.tags.filter((t) => !addedSet.has(t));
-              await auxDb.bookmarkMeta.put({
-                ...meta,
-                tags: remainingTags,
-              });
-              hasAction = true;
-            }
+            await auxDb.transaction('rw', auxDb.bookmarkMeta, async () => {
+              const meta = await auxDb.bookmarkMeta.get(change.bookmarkId);
+              if (meta) {
+                const addedSet = new Set(change.tags!.added);
+                const remainingTags = meta.tags.filter((t) => !addedSet.has(t));
+                await auxDb.bookmarkMeta.put({
+                  ...meta,
+                  tags: remainingTags,
+                });
+                hasAction = true;
+              }
+            });
           } catch (e) {
             res.errors.push(`还原标签失败 (${change.bookmarkTitle}): ${(e as Error).message}`);
           }

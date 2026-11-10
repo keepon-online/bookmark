@@ -126,7 +126,9 @@ export function BrowserBookmarkForm({
           onChange={(e) => setFolderId(e.target.value)}
           className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm"
         >
-          <option value="">书签栏（默认）</option>
+          {/* 编辑模式：空值 = 保持当前文件夹不动（选"不移动"）；
+              新建模式：空值 = 默认落到书签栏 */}
+          <option value="">{isEdit ? '（不移动）' : '书签栏（默认）'}</option>
           {folders.map((folder) => (
             <option key={folder.id} value={folder.id}>
               {folder.path ? `${folder.path}/` : ''}

@@ -201,9 +201,25 @@ async function computeAndApplyReconcile(
       continue;
     }
 
-    // 2) 孤儿：有 urlKey 才有认领/合并的可能
+    // 2) 孤儿：有 urlKey 才有认领/合并的可能。
+    //    升级兼容：旧算法的 urlKey 是整体小写的（新算法保留 path 大小写），
+    //    存量孤儿永远走不到 step 1 的回填——exact miss 时用小写折叠键
+    //    再试一次，让旧数据在新算法下仍能认领/合并
     if (meta.urlKey) {
-      const target = claimable.get(meta.urlKey)?.shift();
+      let target = claimable.get(meta.urlKey)?.shift();
+      let existing = liveMetaByUrlKey.get(meta.urlKey);
+      if (!target && !existing) {
+        const lowerKey = meta.urlKey.toLowerCase();
+        for (const [key, ids] of claimable) {
+          if (key.toLowerCase() === lowerKey && ids.length > 0) {
+            target = ids.shift();
+            break;
+          }
+        }
+        existing ??= [...liveMetaByUrlKey.values()].find(
+          (row) => row.urlKey?.toLowerCase() === lowerKey
+        );
+      }
       if (target) {
         const claimed = { ...meta, bookmarkId: target, orphanedAt: undefined };
         stagePut(claimed);
@@ -215,7 +231,6 @@ async function computeAndApplyReconcile(
       }
 
       // 3) 同链接的节点已有自己的元数据：合并而不是丢弃
-      const existing = liveMetaByUrlKey.get(meta.urlKey);
       if (existing) {
         const merged = mergeMeta(existing, meta);
         // 合并结果必然属于正确的 urlKey 家族，显式写入避免沿用

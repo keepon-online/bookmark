@@ -2,55 +2,21 @@
 
 import * as React from 'react';
 import { HealthReport } from '@/components/linkHealth';
+import { useBrowserBookmarkStore } from '@/stores';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('HealthSettings');
 
 export function HealthSettings() {
-  const [Component, setComponent] = React.useState<typeof HealthReport | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
-
+  // 直达本页（#health 刷新/链接跳转）时没有别的组件会初始化 store：
+  // 不 init 的话 HealthReport 在空数据上算出全零报告、按钮永久禁用
   React.useEffect(() => {
-    // 懒加载组件，避免初始化时卡死
-    const timer = setTimeout(() => {
-      try {
-        setComponent(() => HealthReport);
-        setIsLoading(false);
-      } catch (err) {
-        setError('加载链接健康检查失败');
-        setIsLoading(false);
-      }
-    }, 100);
-
-    return () => clearTimeout(timer);
+    void useBrowserBookmarkStore.getState().init();
   }, []);
-
-  if (isLoading) {
-    return React.createElement('div', { className: 'space-y-6' },
-      React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 dark:text-gray-100' }, '链接健康'),
-      React.createElement('div', {
-        className: 'bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-lg p-6 text-center',
-      },
-        React.createElement('p', { className: 'text-gray-600 dark:text-gray-400' }, '加载中...')
-      )
-    );
-  }
-
-  if (error) {
-    return React.createElement('div', { className: 'space-y-6' },
-      React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 dark:text-gray-100' }, '链接健康'),
-      React.createElement('div', {
-        className: 'bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-lg p-4',
-      },
-        React.createElement('p', { className: 'text-red-800 dark:text-red-300' }, error)
-      )
-    );
-  }
 
   return React.createElement('div', { className: 'space-y-6' },
     React.createElement('h2', { className: 'text-2xl font-bold text-gray-900 dark:text-gray-100' }, '链接健康'),
-    Component && React.createElement(Component, {
+    React.createElement(HealthReport, {
       onCheckAll: () => logger.debug('Health check completed')
     })
   );

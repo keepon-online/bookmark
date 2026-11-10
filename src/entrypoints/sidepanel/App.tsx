@@ -270,6 +270,7 @@ export function App() {
             bookmarks={filtered}
             meta={meta}
             isLoading={isLoading}
+            isSelectable
             selectedIds={selectedIds}
             onSelect={toggleSelect}
             onFavorite={toggleFavorite}

@@ -58,6 +58,15 @@ async function acquireScanLock(): Promise<boolean> {
       return false;
     }
     await chrome.storage.local.set({ [SCAN_LOCK_KEY]: { owner: SCAN_LOCK_OWNER, since: Date.now() } });
+    // 读-判-写非原子：两个上下文同时通过空锁检查会先后 set（后写覆盖
+    // 先写）。写完延迟复核：输家会读到对方的 owner 并退出。storage 写
+    // 串行化在毫秒级，50ms 足以让双方的 set 都落盘
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const verify = (await chrome.storage.local.get(SCAN_LOCK_KEY)) as Record<string, unknown>;
+    const verified = verify?.[SCAN_LOCK_KEY] as ScanLock | undefined;
+    if (verified && verified.owner !== SCAN_LOCK_OWNER) {
+      return false; // 输给并发竞争者
+    }
     return true;
   } catch {
     return true; // storage 不可用（如被策略禁用）：退化为无锁
@@ -645,7 +654,9 @@ export class LinkHealthService {
               const changes = {
                 ...(keepStatus ? {} : { linkStatus: newStatus }),
                 linkCheckedAt: check.checkedAt,
-                lastStatusCode: check.status,
+                // 域名豁免的合成 52x 不是本条目的真实证据：保留原有状态码，
+                // 否则下一轮的"存量纠偏"会把真 404 死链降级出失效面板
+                lastStatusCode: domainSkipped ? item.meta?.lastStatusCode : check.status,
                 lastErrorMessage: check.errorMessage,
                 lastResponseTime: check.responseTime,
               };
@@ -807,6 +818,17 @@ export class LinkHealthService {
             outcome === 'ok' ? '深度复核：真实页面可打开' : '深度复核：真实导航也无法打开',
           lastResponseTime: 0,
         };
+        // 历史表同步落一条（status 用 200/0 表征结论），与批量检查一致，
+        // 未来接入历史面板时轨迹不缺
+        await auxDb.linkChecks.add({
+          id: generateId(),
+          bookmarkId: node.id,
+          status: changes.lastStatusCode,
+          isAccessible: outcome === 'ok',
+          responseTime: 0,
+          errorMessage: changes.lastErrorMessage,
+          checkedAt: changes.linkCheckedAt,
+        });
         const updatedCount = await auxDb.bookmarkMeta.update(node.id, changes);
         if (updatedCount === 0) {
           await auxDb.bookmarkMeta.put({ ...defaultMeta(node.id), ...changes });

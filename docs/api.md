@@ -1437,11 +1437,10 @@ logger.error('请求失败', error);
 | `truncate` | `truncate(text: string, maxLength: number): string` | 超长时截到 `maxLength - 3` 再拼 `'...'` |
 | `sleep` | `sleep(ms: number): Promise<void>` | 延时 |
 | `isValidUrl` | `isValidUrl(url: string): boolean` | 仅 `http:`/`https:` |
-| `normalizeUrl` | `normalizeUrl(url: string): string` | `origin + pathname（去尾部斜杠） + search`；解析失败原样返回 |
-| `getUrlKey` | `getUrlKey(url: string): string` | **去重键**：`normalizeUrl` 后 `toLowerCase()`，再去掉开头的 `http(s)://` 与 `www.` |
+| `getUrlKey` | `getUrlKey(url: string): string` | **去重键**：URL 解析后 `host（小写，去 www.，保留非默认端口） + pathname（去尾斜杠，保留大小写） + search（保留大小写）`；非网页协议（origin 为 `'null'`/空 host）与解析失败原样返回 |
 | `extractKeywords` | `extractKeywords(text: string): string[]` | 小写、标点替换为空格、按空白分词、丢弃长度 ≤ 1 的词、去重 |
 
-`getUrlKey` 示例：`'https://www.Example.com/a/'` → `'example.com/a'`。
+`getUrlKey` 示例：`'https://www.Example.com/a/'` → `'example.com/a'`；注意路径大小写敏感：`watch?v=AbC` 与 `watch?v=abc` 是**不同**的键。
 
 #### 用法示例
 
@@ -1477,7 +1476,7 @@ console.log(cn('px-2', false && 'hidden', 'px-4'));          // 'px-4'
 | `extractDomain` | `extractDomain(url: string): string` | `hostname` | 失败返回 `''`（注意与 `getDomain` 不同，后者回退为入参） |
 | `extractRootDomain` | `extractRootDomain(url: string): string` | 主域名 | 取域名最后两段（如 `a.b.co.uk` → `co.uk`），**不做公共后缀表处理** |
 | `extractKeywords` | `extractKeywords(url: string): string[]` | 关键词 | 域名段：长度 > 3 且不以 `www` 开头；路径段：去掉 `.html/.htm/.php/.asp/.aspx` 后长度 > 2 且非纯数字；去重 |
-| `normalize` | `normalize(url: string): string` | 规范化 URL | 与 `utils.normalizeUrl` 逻辑相同 |
+| `normalize` | `normalize(url: string): string` | 规范化 URL | 去协议/www、host 小写、去尾斜杠与 hash（旧版语义，历史保留） |
 | `isSameUrl` | `isSameUrl(url1: string, url2: string): boolean` | 是否同一资源 | `normalize(url1) === normalize(url2)` |
 
 `private` 判定方法（不可外部调用）：`isGitHub`（`github.com`、`gist.github.com`、

@@ -184,7 +184,7 @@ export function HealthReport({ onCheckAll, className }: HealthReportProps) {
                 variant="ghost"
                 onClick={handleResetAndRecheck}
                 disabled={bookmarks.length === 0}
-                title="清除全部检查记录后重新检查所有链接（忽略跳过窗口，用于纠正历史误判数据）"
+                title="清除全部检查记录后重新检查所有链接（忽略跳过窗口，用于纠正历史误判数据）。注意：「标记为正常」的人工标记也会一并清除，后续自动扫描将重新判定这些链接"
               >
                 清除记录并重查
               </Button>

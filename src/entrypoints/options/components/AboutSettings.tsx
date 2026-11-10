@@ -48,6 +48,10 @@ export function AboutSettings() {
         ),
         React.createElement('div', { className: 'flex justify-between items-center' },
           React.createElement('span', { className: 'text-gray-500 dark:text-gray-400' }, '切换收藏'),
+          React.createElement('kbd', { className: 'px-2 py-1 bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 rounded text-xs border border-gray-200 dark:border-zinc-700' }, 'Alt + Shift + F')
+        ),
+        React.createElement('div', { className: 'flex justify-between items-center' },
+          React.createElement('span', { className: 'text-gray-500 dark:text-gray-400' }, '搜索书签'),
           React.createElement('kbd', { className: 'px-2 py-1 bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 rounded text-xs border border-gray-200 dark:border-zinc-700' }, 'Alt + Shift + K')
         )
       )
