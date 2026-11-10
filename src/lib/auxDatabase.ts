@@ -111,6 +111,32 @@ export async function reconcileMeta(
   bookmarks: BrowserBookmarkNode[],
   nowTs: number = Date.now()
 ): Promise<ReconcileResult> {
+  const { result } = await computeAndApplyReconcile(bookmarks, nowTs);
+  return result;
+}
+
+/**
+ * 对账并一步读出最终元数据映射：对账内部本来就加载了全部行，
+ * 直接拼最终状态返回，省掉调用方紧随其后的第二次全表 toArray()
+ * （refresh 是高频路径，大库下每事件突发可省一半物化成本）
+ */
+export async function reconcileAndLoadMeta(
+  bookmarks: BrowserBookmarkNode[],
+  nowTs: number = Date.now()
+): Promise<Record<string, AuxBookmarkMeta>> {
+  const { finalRows } = await computeAndApplyReconcile(bookmarks, nowTs);
+  const map: Record<string, AuxBookmarkMeta> = {};
+  for (const row of finalRows) {
+    map[row.bookmarkId] = row;
+  }
+  return map;
+}
+
+// 对账核心：加载全部行 → 计算 puts/deletes → 落库 → 返回最终行集合
+async function computeAndApplyReconcile(
+  bookmarks: BrowserBookmarkNode[],
+  nowTs: number
+): Promise<{ result: ReconcileResult; finalRows: AuxBookmarkMeta[] }> {
   const result: ReconcileResult = {
     rebound: 0,
     backfilled: 0,
@@ -120,7 +146,7 @@ export async function reconcileMeta(
   };
   const all = await auxDb.bookmarkMeta.toArray();
   if (all.length === 0) {
-    return result;
+    return { result, finalRows: [] };
   }
 
   // 当前书签 id → urlKey
@@ -230,7 +256,16 @@ export async function reconcileMeta(
     await auxDb.bookmarkMeta.bulkDelete(deletes);
   }
 
-  return result;
+  // 最终行集合 = 原始行 + 待写覆盖 − 待删（调用方可直接复用，免二次全表读）
+  const finalById = new Map(all.map((row) => [row.bookmarkId, row]));
+  for (const [key, row] of putsByKey) {
+    finalById.set(key, row);
+  }
+  for (const id of deletes) {
+    finalById.delete(id);
+  }
+
+  return { result, finalRows: [...finalById.values()] };
 }
 
 export interface AuxExportData {

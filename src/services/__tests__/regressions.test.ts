@@ -533,6 +533,33 @@ describe('regressions', () => {
     expect(meta?.linkStatus).toBeUndefined();
   });
 
+  it('健康报告的"待检查"排除白名单域名与非网页协议书签（可清零）', async () => {
+    const nodes = [
+      makeNode('bm-ok', 'https://ok.example.com/a'),          // 可检查
+      makeNode('bm-wl', 'https://trusted.example.com/x'),     // 白名单（含子域名）
+      makeNode('bm-js', 'javascript:alert(1)'),               // 非网页协议
+    ];
+    // 一条已得出结论，其余无状态
+    await auxDb.bookmarkMeta.put({
+      bookmarkId: 'bm-ok', tags: [], isFavorite: false, visitCount: 0, linkStatus: 'active',
+    });
+
+    const okMeta = (await auxDb.bookmarkMeta.get('bm-ok'))!;
+
+    const report = await linkHealthService.getHealthReport(
+      nodes,
+      { 'bm-ok': okMeta },
+      ['trusted.example.com']
+    );
+
+    expect(report.healthy).toBe(1);
+    // 白名单与协议项不计入待检查，否则数字永远清不空
+    expect(report.pending).toBe(0);
+    // 不传白名单时白名单项回到待检查（兼容旧调用）
+    const legacy = await linkHealthService.getHealthReport(nodes, { 'bm-ok': okMeta });
+    expect(legacy.pending).toBe(1);
+  });
+
   it('跨上下文扫描锁：他人持有且未过期时拒绝，过期或释放后放行', async () => {
     const node = makeNode('bookmark-xlock', 'https://xlock.example.com/page');
 

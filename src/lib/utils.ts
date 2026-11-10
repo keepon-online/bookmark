@@ -34,6 +34,11 @@ function getRelativeTimeFormatter(locale: string): Intl.RelativeTimeFormat {
 export function formatRelativeTime(timestamp: number, locale = 'zh-CN'): string {
   const now = Date.now();
   const diff = now - timestamp;
+  // 未来时间戳（时钟回拨/导入自超前设备的备份）：输出"3600秒后"式
+  // 怪文案，钳位为"刚刚"
+  if (diff < 0) {
+    return '刚刚';
+  }
 
   const seconds = Math.floor(diff / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -123,29 +128,26 @@ export function isValidUrl(url: string): boolean {
   }
 }
 
-// 标准化 URL
-export function normalizeUrl(url: string): string {
+// 计算 URL 去重键：去协议与 www 前缀、去尾斜杠与 hash、host 小写。
+// 路径与查询参数**保持原大小写**——它们在现实中大小写敏感（YouTube
+// 视频 ID、S3/Unix 路径），整体 toLowerCase 会把不同页面判成同页，
+// 查重面板会预选删除"伪重复"书签
+export function getUrlKey(url: string): string {
+  let parsed: URL;
   try {
-    const parsed = new URL(url);
-    // 移除尾部斜杠
-    let normalized = parsed.origin + parsed.pathname.replace(/\/$/, '');
-    // 保留查询参数
-    if (parsed.search) {
-      normalized += parsed.search;
-    }
-    return normalized;
+    parsed = new URL(url);
   } catch {
     return url;
   }
-}
-
-// 计算 URL 去重键：标准化后去除协议与 www 前缀并小写
-// 写入 bookmarks.urlKey 索引，用于 O(log n) 查重
-export function getUrlKey(url: string): string {
-  return normalizeUrl(url)
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
+  // 非网页协议（chrome:/javascript: 等 origin 为 'null'）与空 host：
+  // 构造不出稳定键，原样返回，避免跨协议碰撞成同一个垃圾键
+  if (!parsed.hostname || parsed.origin === 'null') {
+    return url;
+  }
+  const host = (parsed.hostname + (parsed.port ? `:${parsed.port}` : ''))
     .replace(/^www\./, '');
+  const path = parsed.pathname.replace(/\/$/, '');
+  return `${host}${path}${parsed.search}`;
 }
 
 // 提取关键词（简单实现）

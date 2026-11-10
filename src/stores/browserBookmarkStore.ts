@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 import { browserBookmarks } from '@/services/browserBookmarksService';
-import { auxDb, defaultMeta, reconcileMeta } from '@/lib/auxDatabase';
+import { auxDb, defaultMeta, reconcileAndLoadMeta } from '@/lib/auxDatabase';
 import { getUrlKey, now } from '@/lib/utils';
 import { AUTO_SCAN_PROGRESS_KEY } from '@/services/linkHealthAutoScan';
 import type {
@@ -71,15 +71,6 @@ let refreshQueued = false;
 let autoScanWatchSubscribed = false;
 
 const EVENT_RELOAD_DEBOUNCE_MS = 150;
-
-async function loadMetaMap(): Promise<Record<string, AuxBookmarkMeta>> {
-  const rows = await auxDb.bookmarkMeta.toArray();
-  const map: Record<string, AuxBookmarkMeta> = {};
-  for (const row of rows) {
-    map[row.bookmarkId] = row;
-  }
-  return map;
-}
 
 // 事务内读-改-写元数据：多个上下文（popup/sidepanel/后台/整理）并发写
 // 同一行时不再用各自的内存快照整行覆盖——那会把别的写入者刚提交的
@@ -166,10 +157,8 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
       try {
         const snapshot = await browserBookmarks.loadTree();
 
-        // 先把元数据与书签树对账：认领可回收的（书签被重加/换设备同步）、
-        // 补齐 urlKey、清理真正失效的孤儿；然后再读成 map，避免读到刚被清理的行
-        await reconcileMeta(snapshot.bookmarks);
-        const meta = await loadMetaMap();
+        // 对账 + 元数据加载一步完成（对账内部持有全部行，避免二次全表读）
+        const meta = await reconcileAndLoadMeta(snapshot.bookmarks);
 
         set({
           tree: snapshot.tree,

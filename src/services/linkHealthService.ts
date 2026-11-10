@@ -33,10 +33,13 @@ const logger = createLogger('LinkHealth');
 // running 单例只在各上下文（sidepanel/popup/options/background）内有效，
 // 后台定时扫描与手动检查并发时：同一书签同轮双写记录，会把对方几秒前
 // 同轮的失效记录当作"上一轮也失效"，一次瞬时故障即写死链。用
-// storage.local 上的租约锁互斥，TTL 覆盖最差批次（超时自动失效，
-// 持有者被杀不会死锁）
+// storage.local 上的租约锁互斥。
+// TTL 与 autoScan 的判死窗口（≥20 分钟）配套：锁 10 分钟 + 扫描期间
+// 每 3 分钟心跳续租——持有者活着就续不上过期；被杀后 ≤10 分钟自动
+// 失效，不会阻塞超过 autoScan 的判死窗口
 const SCAN_LOCK_KEY = 'linkHealthScanLock';
-const SCAN_LOCK_TTL_MS = 90 * 60_000;
+const SCAN_LOCK_TTL_MS = 10 * 60_000;
+const SCAN_LOCK_RENEW_MS = 3 * 60_000;
 const SCAN_LOCK_OWNER = `ctx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 interface ScanLock {
@@ -58,6 +61,22 @@ async function acquireScanLock(): Promise<boolean> {
     return true;
   } catch {
     return true; // storage 不可用（如被策略禁用）：退化为无锁
+  }
+}
+
+// 心跳续租：仅当锁仍属于自己时刷新时间戳（被 TTL 抢占后不复活）
+async function renewScanLock(): Promise<void> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) {
+    return;
+  }
+  try {
+    const stored = (await chrome.storage.local.get(SCAN_LOCK_KEY)) as Record<string, unknown>;
+    const lock = stored?.[SCAN_LOCK_KEY] as ScanLock | undefined;
+    if (lock?.owner === SCAN_LOCK_OWNER) {
+      await chrome.storage.local.set({ [SCAN_LOCK_KEY]: { owner: SCAN_LOCK_OWNER, since: Date.now() } });
+    }
+  } catch {
+    // 续租失败由 TTL 兜底
   }
 }
 
@@ -156,7 +175,9 @@ export function isCheckableUrl(url?: string): boolean {
 }
 
 // 白名单匹配：精确域名或其子域名（example.com 覆盖 docs.example.com）
-function isWhitelisted(url: string, whitelist: Set<string>): boolean {
+// 白名单匹配：精确域名或其子域名（example.com 覆盖 docs.example.com）。
+// 导出供健康报告口径使用
+export function isWhitelisted(url: string, whitelist: Set<string>): boolean {
   const host = getDomain(url).toLowerCase();
   if (whitelist.has(host)) {
     return true;
@@ -377,10 +398,13 @@ export class LinkHealthService {
 
     try {
       // 跨上下文互斥（storage 租约锁）：防止后台定时扫描与手动检查并发。
-      // 获取失败抛错由 finally 统一复位 running 并释放（未持有的锁不会误删）
+      // 获取失败抛错由 finally 统一复位 running 并释放（未持有的锁不会误删）。
+      // 长扫描期间靠心跳续租维持锁（TTL 只有 10 分钟）
       if (!(await acquireScanLock())) {
         throw new Error('另一个窗口正在检查（如后台定时扫描），请稍后再试');
       }
+      const lockHeartbeat = setInterval(() => void renewScanLock(), SCAN_LOCK_RENEW_MS);
+      try {
       const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
 
       // 预取元数据，再交给与定时自动扫描共用的筛选函数决定哪些真的要检查
@@ -710,6 +734,9 @@ export class LinkHealthService {
       );
 
       return results;
+      } finally {
+        clearInterval(lockHeartbeat);
+      }
     } finally {
       this.running = false;
       this.stopRequested = false;
@@ -754,7 +781,9 @@ export class LinkHealthService {
       if (!(await acquireScanLock())) {
         throw new Error('另一个窗口正在检查（如后台定时扫描），请稍后再试');
       }
-      for (let i = 0; i < nodes.length; i++) {
+      const lockHeartbeat = setInterval(() => void renewScanLock(), SCAN_LOCK_RENEW_MS);
+      try {
+        for (let i = 0; i < nodes.length; i++) {
         if (this.stopRequested) {
           break;
         }
@@ -784,6 +813,9 @@ export class LinkHealthService {
         }
       }
       onProgress?.(nodes.length, nodes.length, '');
+      } finally {
+        clearInterval(lockHeartbeat);
+      }
     } finally {
       this.running = false;
       this.stopRequested = false;
@@ -794,11 +826,16 @@ export class LinkHealthService {
   // 汇总健康报告（基于内存快照 + aux）
   async getHealthReport(
     nodes: BrowserBookmarkNode[],
-    meta: Record<string, AuxBookmarkMeta>
+    meta: Record<string, AuxBookmarkMeta>,
+    whitelist: string[] = []
   ): Promise<LinkHealthReport> {
     let healthy = 0;
     let broken = 0;
     let unreachable = 0;
+    // 白名单域名与非 http(s) 协议的书签永远不会被检查，不计入"待检查"——
+    // 否则该数字永远清不空，"重查待检查"点了也没反应
+    let excluded = 0;
+    const whitelistSet = new Set(whitelist.map((domain) => domain.toLowerCase()));
     // 聚合指标直接读 meta 冗余字段（检查时写入），不再查 linkChecks 全表
     let responseTimeSum = 0;
     let responseTimeCount = 0;
@@ -822,10 +859,15 @@ export class LinkHealthService {
           responseTimeSum += record.lastResponseTime;
           responseTimeCount++;
         }
+      } else if (
+        node.url &&
+        (isWhitelisted(node.url, whitelistSet) || !isCheckableUrl(node.url))
+      ) {
+        excluded++;
       }
     }
 
-    const pending = nodes.length - healthy - broken - unreachable;
+    const pending = nodes.length - healthy - broken - unreachable - excluded;
     return {
       total: nodes.length,
       healthy,

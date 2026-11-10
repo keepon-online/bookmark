@@ -67,6 +67,8 @@ export interface BookmarkProfile {
   // 组织度展示指标（0-100）：入夹率排除直接散落在根目录的书签
   folderedRate: number;
   taggedRate: number;
+  // 链接健康：active 状态数（健康率用 已检查数=healthy+broken 为分母）
+  healthyCount: number;
 
   // 时间统计
   collectionStartDate: number;

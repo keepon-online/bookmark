@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { profileService } from '@/services/profileService';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 
-function node(id: string, url: string, title: string, dateAdded: number, path = ''): BrowserBookmarkNode {
-  return { id, parentId: '1', title, url, index: 0, dateAdded, path };
+function node(
+  id: string,
+  url: string,
+  title: string,
+  dateAdded: number,
+  path = '',
+  parentId = '1'
+): BrowserBookmarkNode {
+  return { id, parentId, title, url, index: 0, dateAdded, path };
 }
 
 describe('profileService v2', () => {
@@ -51,13 +58,22 @@ describe('profileService v2', () => {
     expect(barProfile.organizationScore).toBe(0);
 
     // 放进子文件夹后才计入入夹率：占评分 50% 权重 → 50 分
+    // （parentId 指向子文件夹 f1 而非根）
     const folderedProfile = profileService.getProfile({
-      bookmarks: [node('3', 'https://c.example.com', 'C', 3000, '书签栏/开发')],
+      bookmarks: [node('3', 'https://c.example.com', 'C', 3000, '书签栏/开发', 'f1')],
       folders: [node('f1', '', '开发', 500, '书签栏')],
       meta: {},
     });
     expect(folderedProfile.folderedRate).toBe(100);
     expect(folderedProfile.organizationScore).toBe(50);
+  });
+
+  it('入夹率按根节点 id 判定，不依赖本地化根目录名（英文/Firefox 环境不误判）', () => {
+    // 英文 Chrome：根直属书签 path 首段是 "Bookmarks bar"，旧实现
+    // 按中文标题比对会把它计入"已入夹"（整理率虚高 100%）
+    const loose = [node('1', 'https://a.example.com', 'A', 1000, 'Bookmarks bar')];
+    const profile = profileService.getProfile({ bookmarks: loose, folders: [], meta: {} });
+    expect(profile.folderedRate).toBe(0);
   });
 
   it('空数据不崩溃', () => {

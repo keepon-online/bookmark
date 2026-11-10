@@ -37,12 +37,23 @@ export class ProfileService {
       categoryDistribution[category.id] = 0;
     }
     const tagSet = new Set<string>();
-    // 已放入子文件夹的书签（非直接散落在「书签栏」「其他书签」根下）。
-    // 展示的「分类整理率」与组织度评分共用这一口径
+    // 已放入子文件夹的书签（非直接散落在根目录下）。
+    // 按结构判定（parentId 是否为根节点 id），不比对根目录标题——
+    // 那是浏览器本地化字符串（英文 Chrome 是 "Bookmarks bar"、
+    // Firefox 是"书签工具栏"），按标题比对在非中文环境会全量误判。
+    // Chrome 根节点 id 固定（0 虚拟根 / 1 书签栏 / 2 其他书签 / 3 移动），
+    // 再并入树里实际存在的根，双保险
+    const rootIds = new Set(['0', '1', '2', '3']);
+    for (const folder of folders) {
+      if (folder.parentId === '0') {
+        rootIds.add(folder.id);
+      }
+    }
     let folderedCount = 0;
     let taggedCount = 0;
     let favoriteCount = 0;
     let brokenCount = 0;
+    let healthyCount = 0;
     let aiGeneratedCount = 0;
 
     for (const node of bookmarks) {
@@ -58,19 +69,24 @@ export class ProfileService {
       }
 
       const url = node.url ?? '';
-      const domain = url ? getDomain(url) : '';
-      if (url) {
+      // 域名维度只统计网页协议：bookmarklet/内部页经 getDomain 兜底会
+      // 以整段字符串混进来，污染 uniqueDomains/熵/topDomains/积分
+      const isWebUrl = /^https?:\/\//i.test(url);
+      const domain = isWebUrl ? getDomain(url) : '';
+      if (isWebUrl) {
         domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
         if (url.startsWith('https://')) {
           httpsCount++;
           httpsDomains.add(domain);
         }
+      }
+      if (url) {
         const urlKey = getUrlKey(url);
         urlKeyCounts.set(urlKey, (urlKeyCounts.get(urlKey) ?? 0) + 1);
       }
       categoryDistribution[this.categorize(domain, node.title)]++;
 
-      if (node.path && node.path !== '书签栏' && node.path !== '其他书签') {
+      if (!rootIds.has(node.parentId)) {
         folderedCount++;
       }
 
@@ -80,6 +96,7 @@ export class ProfileService {
         record.tags.forEach((tag) => tagSet.add(tag));
       }
       if (record?.isFavorite) favoriteCount++;
+      if (record?.linkStatus === 'active') healthyCount++;
       if (record?.linkStatus === 'broken' || record?.linkStatus === 'unreachable') brokenCount++;
       if (record?.aiGenerated) aiGeneratedCount++;
     }
@@ -164,6 +181,7 @@ export class ProfileService {
       totalTags: tagSet.size,
       folderedRate: total > 0 ? Math.round((folderedCount / total) * 100) : 0,
       taggedRate: total > 0 ? Math.round(taggedRatio * 100) : 0,
+      healthyCount,
       collectionStartDate,
       collectionEndDate,
       collectionDays,
