@@ -80,8 +80,9 @@ export function App() {
 
   // 初始化：加载树 + 订阅浏览器书签事件 + 应用主题
   React.useEffect(() => {
-    initializeTheme();
+    const cleanupTheme = initializeTheme();
     void useBrowserBookmarkStore.getState().init();
+    return cleanupTheme;
   }, []);
 
   const activeView: ViewType =
@@ -111,9 +112,13 @@ export function App() {
     const store = useBrowserBookmarkStore.getState();
     await store.addBookmark({ url: value.url, title: value.title, parentId: value.folderId });
     if (value.tags.length > 0) {
-      const created = store.bookmarks.find((bookmark) => bookmark.url === value.url);
+      // addBookmark 内部 refresh 会替换 state 对象，闭包里的 store 已过期：
+      // 必须重新取最新快照才能找到新建书签，否则标签静默丢失
+      const created = useBrowserBookmarkStore
+        .getState()
+        .bookmarks.find((bookmark) => bookmark.url === value.url);
       if (created) {
-        await store.addTags([created.id], value.tags);
+        await useBrowserBookmarkStore.getState().addTags([created.id], value.tags);
       }
     }
     setIsAddOpen(false);

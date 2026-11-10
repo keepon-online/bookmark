@@ -510,6 +510,32 @@ describe('regressions', () => {
     expect(exempt?.lastErrorMessage).toContain('防护拦截');
   });
 
+  it('深度复核与批量检查互斥：任一进行中另一方直接抛错', async () => {
+    // 检查进行中 → deepVerify 拒绝
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+      // 模拟检查期间的并发写：用户在侧栏给同一书签打标签
+      await auxDb.bookmarkMeta.update('bookmark-mutex', { tags: ['并发标签'] });
+      return { type: 'basic', ok: true, status: 200, url: 'https://mutex.example.com/page' };
+    }));
+    const node = makeNode('bookmark-mutex', 'https://mutex.example.com/page');
+    await auxDb.bookmarkMeta.put({
+      ...((await auxDb.bookmarkMeta.get('bookmark-mutex')) ?? {
+        bookmarkId: 'bookmark-mutex', tags: [], isFavorite: false, visitCount: 0,
+      }),
+      isFavorite: true,
+    });
+
+    const scanPromise = linkHealthService.checkBookmarks([node], { retries: 0 });
+    await expect(linkHealthService.deepVerify([node])).rejects.toThrow('已有检查');
+    await scanPromise;
+
+    // 扫描结束后：并发写入的标签与收藏仍在（字段级写不整行覆盖）
+    const meta = await auxDb.bookmarkMeta.get('bookmark-mutex');
+    expect(meta?.tags).toContain('并发标签');
+    expect(meta?.isFavorite).toBe(true);
+    expect(meta?.linkStatus).toBe('active');
+  });
+
   it('深度复核：真实导航结论写回 meta，无法得出结论不动状态', async () => {
     vi.stubGlobal('chrome', {
       ...(global.chrome as object),

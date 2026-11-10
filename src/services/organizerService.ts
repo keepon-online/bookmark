@@ -121,7 +121,9 @@ export class OrganizerService {
       if (longTail.length > 0) {
         try {
           const stored = await chrome.storage.local.get('deepseekConfig');
-          deepSeekAIService.initialize(stored.deepseekConfig);
+          // await：initialize 内部要加载持久化缓存（loadCache），
+          // 不等它就把 batchClassify 的缓存前缀跑完 → 每个上下文首查全量 miss
+          await deepSeekAIService.initialize(stored.deepseekConfig);
           const aiResults = await deepSeekAIService.batchClassify(
             longTail.map((index) => inputs[index]),
             { batchSize: 20, folderTree: folderPaths }
@@ -212,13 +214,20 @@ export class OrganizerService {
 
         let appliedTags: string[] = [];
         if (suggestion.suggestedTags.length > 0) {
-          const base =
-            (await auxDb.bookmarkMeta.get(suggestion.node.id)) ?? defaultMeta(suggestion.node.id);
-          appliedTags = suggestion.suggestedTags;
-          await auxDb.bookmarkMeta.put({
-            ...base,
-            tags: [...new Set([...base.tags, ...suggestion.suggestedTags])],
-            aiGenerated: true,
+          // 事务内合并标签（并发写安全），并只记录**实际新增**的子集：
+          // rollback 按值剥离，若记录全部建议标签，用户在生成建议后
+          // 手动加的同名标签会被误删
+          appliedTags = await auxDb.transaction('rw', auxDb.bookmarkMeta, async () => {
+            const base =
+              (await auxDb.bookmarkMeta.get(suggestion.node.id)) ??
+              defaultMeta(suggestion.node.id);
+            const added = suggestion.suggestedTags.filter((tag) => !base.tags.includes(tag));
+            await auxDb.bookmarkMeta.put({
+              ...base,
+              tags: [...new Set([...base.tags, ...suggestion.suggestedTags])],
+              aiGenerated: true,
+            });
+            return added;
           });
           result.tagged++;
         }
@@ -363,10 +372,14 @@ export class OrganizerService {
       }
     }
 
-    await auxDb.organizeHistory.update(historyId, {
-      rolledBack: true,
-      rolledBackAt: now(),
-    });
+    // 全部成功才标记已撤销：部分失败（如原文件夹已被删除）时保持可重试，
+    // 否则失败项永远无法再次回滚，卡在半回滚状态
+    if (res.errors.length === 0) {
+      await auxDb.organizeHistory.update(historyId, {
+        rolledBack: true,
+        rolledBackAt: now(),
+      });
+    }
 
     return res;
   }

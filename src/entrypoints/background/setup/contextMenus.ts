@@ -32,29 +32,32 @@ export function setupContextMenu({
     return;
   }
 
+  // onClicked 必须同步注册（MV3 冷启动唤醒时事件不等异步回调），
+  // 菜单项的清理与重建异步进行即可
+  contextMenus.onClicked.addListener(async (info, tab) => {
+    if (info.menuItemId !== 'add-bookmark') {
+      return;
+    }
+
+    const url = info.linkUrl || info.pageUrl || tab?.url;
+    if (!url) {
+      return;
+    }
+
+    try {
+      await createBookmark({ url, title: tab?.title || url });
+      logger.log('[Background] Bookmark added:', url);
+    } catch (error) {
+      logger.error('[Background] Failed to add bookmark:', error);
+    }
+  });
+
+  // 菜单项清理与重建（幂等，避免 SW 重启后重复项）
   contextMenus.removeAll(() => {
     contextMenus.create({
       id: 'add-bookmark',
       title: '添加到智能书签',
       contexts: ['page', 'link'],
-    });
-
-    contextMenus.onClicked.addListener(async (info, tab) => {
-      if (info.menuItemId !== 'add-bookmark') {
-        return;
-      }
-
-      const url = info.linkUrl || info.pageUrl || tab?.url;
-      if (!url) {
-        return;
-      }
-
-      try {
-        await createBookmark({ url, title: tab?.title || url });
-        logger.log('[Background] Bookmark added:', url);
-      } catch (error) {
-        logger.error('[Background] Failed to add bookmark:', error);
-      }
     });
   });
 }

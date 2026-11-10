@@ -23,11 +23,13 @@
 import { httpChecker, type CheckResult } from '@/lib/httpChecker';
 import { auxDb, defaultMeta, type LinkCheckRecord } from '@/lib/auxDatabase';
 import { generateId, getDomain, now, sleep } from '@/lib/utils';
+import { createLogger } from '@/lib/logger';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 import type { BatchCheckOptions, CheckProgress, LinkCheckResult, LinkHealthReport } from '@/types/linkHealth';
 
-const DEFAULT_CONCURRENCY = 5;
-// 同域名两次请求的最小间隔（毫秒）
+const logger = createLogger('LinkHealth');
+
+const DEFAULT_CONCURRENCY = 5;// 同域名两次请求的最小间隔（毫秒）
 const SAME_DOMAIN_INTERVAL_MS = 250;
 // 同域名遇到限流时间隔的上限（毫秒）
 const MAX_DOMAIN_INTERVAL_MS = 4000;
@@ -386,8 +388,9 @@ export class LinkHealthService {
             continue;
           }
           domainQueue.busy = true;
+          let item: { node: BrowserBookmarkNode; meta?: AuxBookmarkMeta } | undefined;
           try {
-            const item = domainQueue.items[domainQueue.next++];
+            item = domainQueue.items[domainQueue.next++];
 
             // 同域名连续多条命中同一 WAF 拦截码 → 该站拒绝本工具，
             // 剩余条目不再发请求，直接按防护拦截处理（不判死、不耗请求）
@@ -411,12 +414,15 @@ export class LinkHealthService {
                 retries: options.retries,
                 method: rootCheck ? 'GET' : 'HEAD',
               });
-              // HEAD 疑似失效 → GET 复核，避免 HEAD 被服务器特殊对待导致误判
+              // HEAD 疑似失效 → GET 复核，避免 HEAD 被服务器特殊对待导致误判。
+              // 复核前遵守同域名最小间隔——背靠背双请求恰是 WAF 敏感站
+              // 最容易被限流/拦截的请求模式
               if (
                 !rootCheck &&
                 !check.networkError &&
                 classifyLinkStatus(check.status) === 'broken'
               ) {
+                await sleep(Math.max(domainQueue.intervalMs, SAME_DOMAIN_INTERVAL_MS));
                 const verified = await httpChecker.check(item.node.url!, {
                   timeout: options.timeout,
                   retries: options.retries,
@@ -427,21 +433,24 @@ export class LinkHealthService {
                 }
               }
 
-              // WAF 拦截码连击计数：同码连续达标即整域豁免；
-              // 拿到健康响应则清零
-              if (!check.networkError && isWafBlockCode(check.status)) {
-                if (domainQueue.wafStrikeCode === check.status) {
-                  domainQueue.wafStrikeCount++;
+              // WAF 拦截码连击计数：同码**连续**达标即整域豁免。
+              // 任何非 WAF 的 HTTP 响应（含 404/5xx——证明该站并非整站拒绝）
+              // 都打断连击，避免混合状态域名被误豁免
+              if (!check.networkError) {
+                if (isWafBlockCode(check.status)) {
+                  if (domainQueue.wafStrikeCode === check.status) {
+                    domainQueue.wafStrikeCount++;
+                  } else {
+                    domainQueue.wafStrikeCode = check.status;
+                    domainQueue.wafStrikeCount = 1;
+                  }
+                  if (domainQueue.wafStrikeCount >= WAF_DOMAIN_STRIKE) {
+                    domainQueue.wafBlockedCode = check.status;
+                  }
                 } else {
-                  domainQueue.wafStrikeCode = check.status;
-                  domainQueue.wafStrikeCount = 1;
+                  domainQueue.wafStrikeCode = 0;
+                  domainQueue.wafStrikeCount = 0;
                 }
-                if (domainQueue.wafStrikeCount >= WAF_DOMAIN_STRIKE) {
-                  domainQueue.wafBlockedCode = check.status;
-                }
-              } else if (!check.networkError && check.status >= 200 && check.status < 400) {
-                domainQueue.wafStrikeCode = 0;
-                domainQueue.wafStrikeCount = 0;
               }
             }
 
@@ -516,18 +525,22 @@ export class LinkHealthService {
               }
             }
 
-            const base = item.meta ?? defaultMeta(item.node.id);
             // 无主机权限的失败是无效检查：不写 meta、不占跳过窗口，
-            // 授权后下一次"检查全部/重查待检查"即可重新覆盖
+            // 授权后下一次"检查全部/重查待检查"即可重新覆盖。
+            // 字段级原子写（update 只合并检查相关字段）：不整行覆盖，
+            // 长扫描期间用户打的标签/收藏/人工标记不会被启动时的快照回滚
             if (!(check.networkError && check.errorKind === 'blocked')) {
-              await auxDb.bookmarkMeta.put({
-                ...base,
+              const changes = {
                 ...(keepStatus ? {} : { linkStatus: newStatus }),
                 linkCheckedAt: check.checkedAt,
                 lastStatusCode: check.status,
                 lastErrorMessage: check.errorMessage,
                 lastResponseTime: check.responseTime,
-              });
+              };
+              const updatedCount = await auxDb.bookmarkMeta.update(item.node.id, changes);
+              if (updatedCount === 0) {
+                await auxDb.bookmarkMeta.put({ ...defaultMeta(item.node.id), ...changes });
+              }
             }
 
             results.push({
@@ -571,6 +584,13 @@ export class LinkHealthService {
               domainQueue.intervalMs = nextDomainInterval(domainQueue.intervalMs, check.status);
               domainQueue.nextAvailableTime = now() + domainQueue.intervalMs;
             }
+          } catch (error) {
+            // 单条失败（如 IndexedDB 写入异常）不让 worker 抛出：
+            // 抛出会使 Promise.all 提前 reject 并复位 stopRequested，
+            // 其余 worker 变成僵尸继续消费旧队列，且 running=false 期间
+            // 可再启新一轮造成两轮并发。记录后让本 worker 干净退出
+            logger.error('Check item failed', item?.node.url ?? '', error);
+            return;
           } finally {
             domainQueue.busy = false;
           }
@@ -587,58 +607,76 @@ export class LinkHealthService {
     } finally {
       this.running = false;
       this.stopRequested = false;
+      // 历史记录滚动清理（保留 30 天）：每次扫描收尾顺带执行，
+      // 避免 linkChecks 无限增长拖慢历史查询与逼近存储配额
+      try {
+        await this.cleanupOldRecords(30);
+      } catch (error) {
+        logger.error('Cleanup old check records failed', error);
+      }
     }
   }
 
   // 人工标记为正常：后续自动扫描不再改判（force 重查除外）
   async markAsHealthy(bookmarkIds: string[]): Promise<void> {
-    const metas = await auxDb.bookmarkMeta.bulkGet(bookmarkIds);
-    const updates: AuxBookmarkMeta[] = [];
-    bookmarkIds.forEach((bookmarkId, index) => {
-      const base = metas[index] ?? defaultMeta(bookmarkId);
-      updates.push({
-        ...base,
-        linkStatus: 'active',
-        linkStatusManual: true,
-      });
-    });
-    await auxDb.bookmarkMeta.bulkPut(updates);
+    // 字段级原子写，避免整行覆盖并发写入的其他元数据
+    for (const bookmarkId of bookmarkIds) {
+      const changes = { linkStatus: 'active' as const, linkStatusManual: true };
+      const updatedCount = await auxDb.bookmarkMeta.update(bookmarkId, changes);
+      if (updatedCount === 0) {
+        await auxDb.bookmarkMeta.put({ ...defaultMeta(bookmarkId), ...changes });
+      }
+    }
   }
 
   // 深度复核指定书签：逐条用后台真实导航终审（可被 stopCheck 打断）。
-  // 结论写回 meta：ok → active，dead → broken，unknown（超时/不支持）不动状态
+  // 结论写回 meta：ok → active，dead → broken，unknown（超时/不支持）不动状态。
+  // 与 checkBookmarks 共享 running 互斥：两者并发会对同一书签
+  // 互相覆盖结论，且共享的 stopRequested 会互相打断
   async deepVerify(
     nodes: BrowserBookmarkNode[],
     onProgress?: (done: number, total: number, current: string) => void
   ): Promise<void> {
-    this.stopRequested = false;
-    for (let i = 0; i < nodes.length; i++) {
-      if (this.stopRequested) {
-        break;
-      }
-      const node = nodes[i];
-      onProgress?.(i, nodes.length, node.title || node.url || '');
-      if (!node.url || !isCheckableUrl(node.url)) {
-        continue;
-      }
-
-      const outcome = await deepVerifyUrl(node.url);
-      if (outcome === 'unknown') {
-        continue;
-      }
-
-      const base = (await auxDb.bookmarkMeta.get(node.id)) ?? defaultMeta(node.id);
-      await auxDb.bookmarkMeta.put({
-        ...base,
-        linkStatus: outcome === 'ok' ? 'active' : 'broken',
-        linkCheckedAt: now(),
-        lastStatusCode: outcome === 'ok' ? 200 : 0,
-        lastErrorMessage:
-          outcome === 'ok' ? '深度复核：真实页面可打开' : '深度复核：真实导航也无法打开',
-        lastResponseTime: 0,
-      });
+    if (this.running) {
+      throw new Error('已有检查正在进行中，请先停止或等待完成');
     }
-    onProgress?.(nodes.length, nodes.length, '');
+    this.running = true;
+    this.stopRequested = false;
+    try {
+      for (let i = 0; i < nodes.length; i++) {
+        if (this.stopRequested) {
+          break;
+        }
+        const node = nodes[i];
+        onProgress?.(i, nodes.length, node.title || node.url || '');
+        if (!node.url || !isCheckableUrl(node.url)) {
+          continue;
+        }
+
+        const outcome = await deepVerifyUrl(node.url);
+        if (outcome === 'unknown') {
+          continue;
+        }
+
+        // 字段级原子写：只写检查相关字段，不整行覆盖
+        const changes = {
+          linkStatus: outcome === 'ok' ? ('active' as const) : ('broken' as const),
+          linkCheckedAt: now(),
+          lastStatusCode: outcome === 'ok' ? 200 : 0,
+          lastErrorMessage:
+            outcome === 'ok' ? '深度复核：真实页面可打开' : '深度复核：真实导航也无法打开',
+          lastResponseTime: 0,
+        };
+        const updatedCount = await auxDb.bookmarkMeta.update(node.id, changes);
+        if (updatedCount === 0) {
+          await auxDb.bookmarkMeta.put({ ...defaultMeta(node.id), ...changes });
+        }
+      }
+      onProgress?.(nodes.length, nodes.length, '');
+    } finally {
+      this.running = false;
+      this.stopRequested = false;
+    }
   }
 
   // 汇总健康报告（基于内存快照 + aux）
@@ -701,7 +739,9 @@ export class LinkHealthService {
   }
 
   // 清除全部检查结果（历史记录 + 元数据上的 linkStatus/linkCheckedAt），
-  // 用于纠正历史误判数据；标签/收藏/备注等其他元数据保留
+  // 用于纠正历史误判数据；标签/收藏/备注等其他元数据保留。
+  // urlKey/orphanedAt 必须保留：孤儿元数据靠它们走 90 天认领/TTL 流程，
+  // 抹掉后 refresh 的对账会把等待认领的元数据当作旧数据直接删除
   async resetCheckResults(): Promise<void> {
     if (this.running) {
       throw new Error('A check is running');
@@ -717,6 +757,8 @@ export class LinkHealthService {
         visitCount: meta.visitCount,
         lastVisited: meta.lastVisited,
         aiGenerated: meta.aiGenerated,
+        urlKey: meta.urlKey,
+        orphanedAt: meta.orphanedAt,
       }))
     );
   }

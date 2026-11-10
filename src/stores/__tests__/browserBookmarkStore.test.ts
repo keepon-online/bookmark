@@ -108,15 +108,65 @@ describe('browserBookmarkStore', () => {
     expect(chrome.bookmarks.create).not.toHaveBeenCalled();
   });
 
-  it('removeBookmarks 调用浏览器删除并清理 aux 元数据', async () => {
+  it('removeBookmarks 走认领机制：同 URL 副本存活时元数据合并过去', async () => {
+    // 两个同 urlKey 副本：111 带元数据，112 无
+    const dupTree = {
+      id: '0',
+      title: '',
+      children: [
+        {
+          id: '1',
+          parentId: '0',
+          title: '书签栏',
+          index: 0,
+          children: [
+            { id: '111', parentId: '1', title: 'A', url: 'https://dup.example.com/page', index: 0, dateAdded: 300 },
+            { id: '112', parentId: '1', title: 'B', url: 'https://dup.example.com/page', index: 1, dateAdded: 200 },
+          ],
+        },
+      ],
+    } as unknown as chrome.bookmarks.BookmarkTreeNode;
+    vi.mocked(chrome.bookmarks.getTree).mockResolvedValue([dupTree]);
+
     const store = useBrowserBookmarkStore;
     await store.getState().init();
     await store.getState().addTags(['111'], ['开发']);
+    // 刷新一次回填 urlKey（认领/合并都靠它匹配）
+    await store.getState().refresh();
+
+    // 删除 111：之后的树只剩 112（同 urlKey，无自己的元数据）
+    const afterRemove = structuredClone(dupTree);
+    const bar = afterRemove.children![0];
+    bar.children = [bar.children![1]];
+    vi.mocked(chrome.bookmarks.getTree).mockResolvedValue([afterRemove]);
 
     await store.getState().removeBookmarks(['111']);
 
     expect(chrome.bookmarks.remove).toHaveBeenCalledWith('111');
+    // 111 的元数据被 112 认领（标签保留），而不是被直接删掉
     expect(await auxDb.bookmarkMeta.get('111')).toBeUndefined();
+    const claimed = await auxDb.bookmarkMeta.get('112');
+    expect(claimed?.tags).toEqual(['开发']);
+  });
+
+  it('removeBookmarks 无同 URL 副本时保留元数据等待认领窗口', async () => {
+    const store = useBrowserBookmarkStore;
+    await store.getState().init();
+    await store.getState().addTags(['112'], ['孤立']);
+    // 再刷新一次让 112 的行回填 urlKey（否则按旧数据处理直接清理）
+    await store.getState().refresh();
+
+    // 删除 112 后书签栏为空
+    const emptyTree = structuredClone(testTree);
+    emptyTree.children![0].children = [];
+    vi.mocked(chrome.bookmarks.getTree).mockResolvedValue([emptyTree]);
+
+    await store.getState().removeBookmarks(['112']);
+
+    // 90 天认领窗口内元数据保留（带 orphanedAt），不直接删
+    const orphan = await auxDb.bookmarkMeta.get('112');
+    expect(orphan?.tags).toEqual(['孤立']);
+    expect(orphan?.orphanedAt).toBeGreaterThan(0);
   });
 
   it('refresh 清理已不存在书签的孤儿元数据', async () => {

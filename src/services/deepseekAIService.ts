@@ -274,7 +274,7 @@ export class DeepSeekAIService {
     const uncachedBookmarks: { index: number; bookmark: Bookmark }[] = [];
     for (let i = 0; i < bookmarks.length; i++) {
       const bookmark = bookmarks[i];
-      const cacheKey = this.getCacheKey(bookmark.url, bookmark.title);
+      const cacheKey = this.getCacheKey(bookmark.url, bookmark.title, folderTree);
       const cached = this.cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
         cached.hitCount++;
@@ -323,7 +323,7 @@ export class DeepSeekAIService {
           results[index] = result;
 
           // 缓存结果
-          const cacheKey = this.getCacheKey(bookmark.url, bookmark.title);
+          const cacheKey = this.getCacheKey(bookmark.url, bookmark.title, folderTree);
           this.cache.set(cacheKey, {
             url: bookmark.url,
             title: bookmark.title,
@@ -434,7 +434,10 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
   }
 
   /**
-   * 解析批量分类响应
+   * 解析批量分类响应。
+   * 模型可能乱序返回或漏项：优先按每项携带的 1-based index 对位，
+   * 缺失 index 时退回位置对齐；漏掉的槽位由调用方用默认结果兜底——
+   * 避免错位把 A 书签的文件夹/标签套到 B 书签上
    */
   private parseBatchClassificationResponse(content: string, expectedCount: number): LLMClassificationResult[] {
     try {
@@ -450,16 +453,30 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
         throw new Error('Response is not an array');
       }
 
-      return parsed.map((item: any) => ({
-        suggestedTags: item.suggestedTags || [],
-        suggestedFolder: item.suggestedFolder,
-        contentType: item.contentType || 'other',
-        confidence: item.confidence || 0.5,
-        reasoning: item.reasoning || '',
-        alternativeTags: item.alternativeTags || [],
-        alternativeFolders: item.alternativeFolders || [],
-        method: 'llm' as const,
-      }));
+      const byIndex: (LLMClassificationResult | null)[] = new Array(expectedCount).fill(null);
+      parsed.forEach((item: any, position: number) => {
+        const result = {
+          suggestedTags: item.suggestedTags || [],
+          suggestedFolder: item.suggestedFolder,
+          contentType: item.contentType || 'other',
+          confidence: item.confidence || 0.5,
+          reasoning: item.reasoning || '',
+          alternativeTags: item.alternativeTags || [],
+          alternativeFolders: item.alternativeFolders || [],
+          method: 'llm' as const,
+        } as LLMClassificationResult;
+        const slot =
+          typeof item.index === 'number' && Number.isInteger(item.index) &&
+          item.index >= 1 && item.index <= expectedCount
+            ? item.index - 1
+            : position < expectedCount
+              ? position
+              : -1;
+        if (slot >= 0 && !byIndex[slot]) {
+          byIndex[slot] = result; // 重复 index 取首个
+        }
+      });
+      return byIndex.map((result) => result ?? this.getDefaultResult());
     } catch (error) {
       logger.error('Failed to parse batch response', content);
       // 返回默认结果数组
@@ -524,10 +541,12 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
   }
 
   /**
-   * 获取缓存键
+   * 获取缓存键。
+   * folderTree 参与键值：分类目标是用户当前目录结构，结构变了旧建议
+   * （旧文件夹路径）不该被复用——否则会把用户刚删掉的目录重建出来
    */
-  private getCacheKey(url: string, title: string): string {
-    return `${url}|${title}`;
+  private getCacheKey(url: string, title: string, folderTree?: string[]): string {
+    return `${url}|${title}|${folderTree?.join('/') ?? ''}`;
   }
 
   /**

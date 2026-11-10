@@ -296,4 +296,52 @@ describe('deepSeekAIService', () => {
     // 保留的是最近 30 天（最早的 6 条被裁掉）
     expect(stats.dailyStats[0].date).toBe('2026-01-07');
   });
+
+  it('模型乱序返回/漏项时按 index 对位，不错配到相邻书签', async () => {
+    await deepSeekAIService.clearCache();
+    await deepSeekAIService.initialize(config());
+
+    // 3 条入参，模型乱序返回（2,3,1）且漏掉中间的 2 → 各归各位，漏项兜底默认结果
+    chatCompletions.mockResolvedValue(
+      llmResponse(
+        JSON.stringify([
+          { index: 3, suggestedTags: ['C'], suggestedFolder: '三号', confidence: 0.9 },
+          { index: 1, suggestedTags: ['A'], suggestedFolder: '一号', confidence: 0.9 },
+        ])
+      )
+    );
+
+    const results = await deepSeekAIService.batchClassify(
+      [bookmark('x1', 'https://x1.com/'), bookmark('x2', 'https://x2.com/'), bookmark('x3', 'https://x3.com/')],
+      { batchSize: 10 }
+    );
+
+    expect(results[0]).toMatchObject({ suggestedFolder: '一号', suggestedTags: ['A'] });
+    // 漏掉的 2 号拿到默认结果（低置信度），而不是错拿 3 号的建议
+    expect(results[1].suggestedFolder).toBeUndefined();
+    expect(results[1].confidence).toBeLessThan(results[0].confidence);
+    expect(results[2]).toMatchObject({ suggestedFolder: '三号', suggestedTags: ['C'] });
+  });
+
+  it('无 index 字段时退回位置对齐（旧行为兼容）', async () => {
+    await deepSeekAIService.clearCache();
+    await deepSeekAIService.initialize(config());
+
+    chatCompletions.mockResolvedValue(
+      llmResponse(
+        JSON.stringify([
+          { suggestedTags: ['A'], suggestedFolder: 'F1', confidence: 0.8 },
+          { suggestedTags: ['B'], suggestedFolder: 'F2', confidence: 0.8 },
+        ])
+      )
+    );
+
+    const results = await deepSeekAIService.batchClassify(
+      [bookmark('y1', 'https://y1.com/'), bookmark('y2', 'https://y2.com/')],
+      { batchSize: 10 }
+    );
+
+    expect(results[0]).toMatchObject({ suggestedFolder: 'F1' });
+    expect(results[1]).toMatchObject({ suggestedFolder: 'F2' });
+  });
 });

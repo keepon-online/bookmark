@@ -73,6 +73,21 @@ async function loadMetaMap(): Promise<Record<string, AuxBookmarkMeta>> {
   return map;
 }
 
+// 事务内读-改-写元数据：多个上下文（popup/sidepanel/后台/整理）并发写
+// 同一行时不再用各自的内存快照整行覆盖——那会把别的写入者刚提交的
+// 字段回滚掉。标签合并、计数递增这类需要读到最新值的操作必须走这里
+async function mutateMeta(
+  id: string,
+  mutate: (meta: AuxBookmarkMeta) => AuxBookmarkMeta
+): Promise<AuxBookmarkMeta> {
+  return auxDb.transaction('rw', auxDb.bookmarkMeta, async () => {
+    const current = (await auxDb.bookmarkMeta.get(id)) ?? defaultMeta(id);
+    const next = mutate(current);
+    await auxDb.bookmarkMeta.put(next);
+    return next;
+  });
+}
+
 export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) => ({
   isInitialized: false,
   isLoading: false,
@@ -133,7 +148,9 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
 
   setSearchQuery: (query) => set({ searchQuery: query }),
   setCurrentFolder: (folderId) => set({ currentFolderId: folderId, filter: 'all', selectedTag: undefined }),
-  setFilter: (filter, tag) => set({ filter, selectedTag: tag }),
+  // 快速过滤与文件夹视图互斥：切快速视图即退出文件夹，
+  // 否则 currentFolderId 仍限定列表，"全部书签"按钮表现为无效点击
+  setFilter: (filter, tag) => set({ filter, selectedTag: tag, currentFolderId: undefined }),
   clearFilters: () =>
     set({ searchQuery: '', currentFolderId: undefined, filter: 'all', selectedTag: undefined }),
 
@@ -177,7 +194,9 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
     for (const id of ids) {
       await browserBookmarks.remove(id, folderIds.has(id));
     }
-    await auxDb.bookmarkMeta.bulkDelete(ids);
+    // 不直接删元数据：refresh 内的 reconcileMeta 会按 urlKey 处理——
+    // 同链接副本仍存活时合并标签/收藏到存活方，无副本则留 90 天认领窗口。
+    // 直接 bulkDelete 会把查重清理场景下要保留的元数据一起删掉
     await get().refresh();
     set((state) => {
       const selectedIds = new Set(state.selectedIds);
@@ -197,52 +216,46 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
   },
 
   toggleFavorite: async (id) => {
-    const current = get().meta[id] ?? defaultMeta(id);
-    const next = { ...current, isFavorite: !current.isFavorite };
-    await auxDb.bookmarkMeta.put(next);
+    const next = await mutateMeta(id, (current) => ({
+      ...current,
+      isFavorite: !current.isFavorite,
+    }));
     set({ meta: { ...get().meta, [id]: next } });
   },
 
   addTags: async (ids, tags) => {
-    const updates: AuxBookmarkMeta[] = [];
+    const meta = { ...get().meta };
     for (const id of ids) {
-      const current = get().meta[id] ?? defaultMeta(id);
-      updates.push({
+      meta[id] = await mutateMeta(id, (current) => ({
         ...current,
         tags: [...new Set([...current.tags, ...tags])],
-      });
-    }
-    await auxDb.bookmarkMeta.bulkPut(updates);
-    const meta = { ...get().meta };
-    for (const update of updates) {
-      meta[update.bookmarkId] = update;
+      }));
     }
     set({ meta });
   },
 
   removeTag: async (id, tag) => {
-    const current = get().meta[id];
-    if (!current) return;
-    const next = { ...current, tags: current.tags.filter((t) => t !== tag) };
-    await auxDb.bookmarkMeta.put(next);
+    const next = await mutateMeta(id, (current) => ({
+      ...current,
+      tags: current.tags.filter((t) => t !== tag),
+    }));
     set({ meta: { ...get().meta, [id]: next } });
   },
 
   setNotes: async (id, notes) => {
-    const current = get().meta[id] ?? defaultMeta(id);
-    const next = { ...current, notes: notes || undefined };
-    await auxDb.bookmarkMeta.put(next);
+    const next = await mutateMeta(id, (current) => ({
+      ...current,
+      notes: notes || undefined,
+    }));
     set({ meta: { ...get().meta, [id]: next } });
   },
 
   recordVisit: async (id) => {
-    const current = get().meta[id] ?? defaultMeta(id);
-    const next = {
+    const next = await mutateMeta(id, (current) => ({
       ...current,
       visitCount: current.visitCount + 1,
       lastVisited: now(),
-    };
-    await auxDb.bookmarkMeta.put(next);
+    }));
     set({ meta: { ...get().meta, [id]: next } });
   },
 }));

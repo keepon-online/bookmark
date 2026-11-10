@@ -18,8 +18,20 @@ const logger = createLogger('Background');
 export default defineBackground(() => {
   logger.info('Service Worker started');
 
-  // 将页面加入浏览器书签栏
+  // —— 异步业务处理器（可安全等待，不影响下方监听器注册；Dexie 惰性打开） ——
+
+  // 将页面加入浏览器书签栏（先按 urlKey 查重，与 UI 添加路径行为一致：
+  // 否则扩展自己就能制造出查重清理要处理的重复项）
   async function addBookmarkToBar(input: { url: string; title: string }): Promise<unknown> {
+    const urlKey = getUrlKey(input.url);
+    const snapshot = await browserBookmarks.loadTree();
+    const exists = snapshot.bookmarks.some(
+      (bookmark) => bookmark.url && getUrlKey(bookmark.url) === urlKey
+    );
+    if (exists) {
+      logger.info('Bookmark already exists, skip quick-add:', input.url);
+      return null;
+    }
     return chrome.bookmarks.create({
       parentId: BOOKMARK_BAR_ID,
       url: input.url,
@@ -50,35 +62,28 @@ export default defineBackground(() => {
     return removed;
   }
 
-  // 初始化
-  async function initialize() {
-    logger.info('Initializing...');
-    try {
-      await auxDb.open();
-      setupContextMenu({
-        contextMenus: typeof chrome !== 'undefined' ? chrome.contextMenus : undefined,
-        createBookmark: addBookmarkToBar,
-      });
-      setupAlarms({
-        alarms: typeof chrome !== 'undefined' ? chrome.alarms : undefined,
-      });
-      setupCommands({
-        commands: typeof chrome !== 'undefined' ? chrome.commands : undefined,
-        commandDeps: {
-          addBookmarkToBar,
-          toggleFavoriteByUrl,
-          getCurrentPageInfo,
-        },
-      });
-      setupBookmarkListeners({
-        bookmarks: typeof chrome !== 'undefined' ? chrome.bookmarks : undefined,
-        cleanOrphanMeta,
-      });
-      logger.info('Ready');
-    } catch (error) {
-      logger.error('Initialization failed', error);
-    }
-  }
+  // —— MV3 关键约束：唤醒事件的监听器必须在 SW 顶层同步注册 ——
+  // 若放在任何 await 之后，SW 冷启动被闹钟/快捷键/书签事件唤醒时，
+  // 事件在监听器注册前已分发完毕，直接丢失（自动扫描、快捷键间歇失效）
+  setupContextMenu({
+    contextMenus: typeof chrome !== 'undefined' ? chrome.contextMenus : undefined,
+    createBookmark: addBookmarkToBar,
+  });
+  setupAlarms({
+    alarms: typeof chrome !== 'undefined' ? chrome.alarms : undefined,
+  });
+  setupCommands({
+    commands: typeof chrome !== 'undefined' ? chrome.commands : undefined,
+    commandDeps: {
+      addBookmarkToBar,
+      toggleFavoriteByUrl,
+      getCurrentPageInfo,
+    },
+  });
+  setupBookmarkListeners({
+    bookmarks: typeof chrome !== 'undefined' ? chrome.bookmarks : undefined,
+    cleanOrphanMeta,
+  });
 
   // 处理消息：仅保留后台专属能力（读取当前页面信息）
   onMessage(
@@ -99,7 +104,4 @@ export default defineBackground(() => {
       };
     }
   );
-
-  // 启动
-  initialize();
 });
