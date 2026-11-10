@@ -151,15 +151,20 @@ export async function runAutoScanTick(
   await deps.writeProgress({ runningSince: nowTs, startedAt, checked: alreadyChecked });
 
   let lastError: string | undefined;
+  let checkedCount = batch.length;
   try {
-    await deps.check(batch, options);
+    const batchResults = await deps.check(batch, options);
+    // 以实际产出计数：check 抛错（如与重叠 tick 撞上单例守卫）时
+    // 返回 0 条结果，进度不应虚增整批
+    checkedCount = batchResults.length;
   } catch (error) {
     lastError = (error as Error).message;
+    checkedCount = 0;
     logger.error('Auto scan batch failed', error);
   }
 
   const remaining = candidates.length - batch.length;
-  const checked = alreadyChecked + batch.length;
+  const checked = alreadyChecked + checkedCount;
 
   if (remaining > 0) {
     // 还有剩：记进度并安排 1 分钟后的续跑

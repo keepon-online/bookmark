@@ -82,9 +82,10 @@ export function useFilteredBookmarks(): BrowserBookmarkNode[] {
   }, [scoped, meta, filter, selectedTag]);
 
   // 阶段 3：排序（recent 截取依赖顺序）；有搜索词时 Fuse 会按相关度
-  // 重排，跳过整段排序
+  // 重排，跳过整段排序——但 recent 的时间窗截断必须保留，
+  // 否则搜索范围会扩大到整个作用域里的老书签
   const sorted = useMemo(() => {
-    if (hasQuery) {
+    if (hasQuery && filter !== 'recent') {
       return filtered;
     }
     const list = [...filtered].sort((a, b) => (b.dateAdded ?? 0) - (a.dateAdded ?? 0));

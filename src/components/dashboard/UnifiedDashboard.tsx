@@ -45,9 +45,11 @@ export function UnifiedDashboard() {
     trends: true,
   });
 
-  const loadData = useCallback(async () => {
+  // keepData：手动刷新时已有数据则保持展示（按钮转圈 + 局部刷新），
+  // 不整页退回骨架屏；仅首次加载/无数据时走骨架屏
+  const loadData = useCallback(async (keepData = false) => {
     try {
-      setIsLoading(true);
+      setIsLoading(!keepData);
       setError(null);
 
       // 确保浏览器书签快照就绪，然后纯计算档案
@@ -75,7 +77,7 @@ export function UnifiedDashboard() {
     setIsRefreshing(true);
     try {
       // init() 内部会 refresh 全量快照，无需在此重复拉取
-      await loadData();
+      await loadData(profile !== null);
     } finally {
       setIsRefreshing(false);
     }

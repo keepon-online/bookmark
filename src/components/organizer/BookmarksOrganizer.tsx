@@ -70,6 +70,14 @@ export function BookmarksOrganizer({ onComplete, className }: BookmarksOrganizer
     void isDeepSeekEnabled().then(setDeepSeekOn);
   }, []);
 
+  // 整理配置（范围/引擎/置信度）变化后旧建议失效：
+  // 建议是生成时刻的快照，继续展示会让"应用所选"按旧范围执行
+  React.useEffect(() => {
+    setSuggestions(null);
+    setExcluded(new Set());
+    setResult(null);
+  }, [scope, engine, minConfidence]);
+
   const loadHistory = React.useCallback(async () => {
     try {
       const list = await organizerService.getHistory(15);

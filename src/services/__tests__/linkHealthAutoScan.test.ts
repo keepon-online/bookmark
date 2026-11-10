@@ -6,7 +6,7 @@ import {
   runAutoScanTick,
   type AutoScanProgress,
 } from '@/services/linkHealthAutoScan';
-import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
+import type { AuxBookmarkMeta, BrowserBookmarkNode, LinkCheckResult } from '@/types';
 
 const NOW = 1_000_000;
 
@@ -36,7 +36,10 @@ function makeDeps(
   options: { store?: ReturnType<typeof makeStore>; settings?: ScanSettings } = {}
 ) {
   const store = options.store ?? makeStore();
-  const check = vi.fn().mockResolvedValue([]);
+  // 默认 mock：返回与批量等长的结果数组（进度按实际产出计数）
+  const check = vi.fn(async (nodes: BrowserBookmarkNode[]) =>
+    nodes.map(() => ({}) as LinkCheckResult)
+  );
   const scheduleContinue = vi.fn().mockResolvedValue(undefined);
   const clearContinue = vi.fn().mockResolvedValue(undefined);
 
@@ -149,7 +152,7 @@ describe('runAutoScanTick', () => {
     expect(progress?.lastError).toBeUndefined();
   });
 
-  it('整批抛错（如权限被撤）时记录 lastError，不把进度丢掉', async () => {
+  it('整批抛错（如权限被撤/撞上单例守卫）时记录 lastError，进度不虚增', async () => {
     const store = makeStore({ startedAt: NOW - 5_000, checked: 3 });
     const { deps, check } = makeDeps([node('1', 'https://a.com/')], {}, { store });
     check.mockRejectedValueOnce(new Error('已有检查正在进行中'));
@@ -158,6 +161,7 @@ describe('runAutoScanTick', () => {
 
     expect(result.finished).toBe(true);
     expect(store.get()?.lastError).toBe('已有检查正在进行中');
-    expect(store.get()?.checked).toBe(4);
+    // 0 条实查 → 进度保持原值，不按整批虚增
+    expect(store.get()?.checked).toBe(3);
   });
 });
