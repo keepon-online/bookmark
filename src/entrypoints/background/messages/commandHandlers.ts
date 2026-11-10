@@ -73,8 +73,16 @@ export function createDefaultCommandHandler(
     openSidePanel:
       deps.openSidePanel ??
       (async ({ windowId }) => {
-        // 上游没拿到 windowId 时（如全部窗口最小化）取当前窗口兜底
-        const realId = windowId ?? (await chrome.windows.getCurrent())?.id;
+        // 上游没拿到 windowId 时（如全部窗口最小化）取当前窗口兜底；
+        // 兜底失败也不能让命令成为 unhandled rejection
+        let realId = windowId;
+        if (realId === undefined) {
+          try {
+            realId = (await chrome.windows.getCurrent())?.id;
+          } catch {
+            // windows API 不可用（上下文失效），不带 windowId 尽力打开
+          }
+        }
         await openSidePanelHelper(realId);
       }),
   });

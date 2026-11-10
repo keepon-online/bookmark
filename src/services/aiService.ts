@@ -170,7 +170,6 @@ const DEFAULT_RULES: ClassificationRule[] = [
     conditions: [
       { type: 'domain', operator: 'endsWith', value: 'react.dev' },
       { type: 'domain', operator: 'endsWith', value: 'vuejs.org' },
-      { type: 'domain', operator: 'endsWith', value: '.vuejs.org' },
       { type: 'domain', operator: 'endsWith', value: 'angular.io' },
       { type: 'domain', operator: 'endsWith', value: 'angular.dev' },
       { type: 'domain', operator: 'endsWith', value: 'svelte.dev' },
@@ -581,9 +580,8 @@ export class AIService {
   }
 
   /**
-   * 评估操作符。domain 类型的 endsWith 强制点边界：
-   * 'amazon.com' 不能命中 'myamazon.com'（'xx.github.io' 这类
-   * 已带前导点的值不受影响）
+   * 评估操作符。domain 类型的 endsWith 强制点边界（值自动补前导点）：
+   * 'amazon.com' 不能命中 'myamazon.com'，命中裸域或任意子域
    */
   private evaluateOperator(
     target: string,

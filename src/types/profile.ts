@@ -133,7 +133,7 @@ export const CATEGORY_CONFIGS: CategoryConfig[] = [
     color: '#3B82F6',
     domains: [
       'github.com', 'stackoverflow.com', 'dev.to', 'medium.com',
-      'hackernews.com', 'gitlab.com', 'npmjs.com', 'pypi.org',
+      'news.ycombinator.com', 'gitlab.com', 'npmjs.com', 'pypi.org',
       'juejin.cn', 'segmentfault.com', 'csdn.net', 'cnblogs.com',
       'oschina.net', 'gitee.com', 'v2ex.com', 'infoq.cn',
     ],
@@ -147,7 +147,7 @@ export const CATEGORY_CONFIGS: CategoryConfig[] = [
     domains: [
       'coursera.org', 'udemy.com', 'edx.org', 'khanacademy.org',
       'leetcode.com', 'hackerrank.com', 'codecademy.com',
-      'freecodecamp.org', 'w3schools.com', 'mdn.io',
+      'freecodecamp.org', 'w3schools.com', 'developer.mozilla.org',
       'mooc.cn', 'icourse163.org', 'xuetangx.com',
     ],
     keywords: ['learn', 'course', 'tutorial', 'education', 'study', 'training'],

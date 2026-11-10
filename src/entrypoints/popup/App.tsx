@@ -239,7 +239,11 @@ export function App() {
               void chrome.windows
                 .getCurrent()
                 .then((win) => openSidePanel(win.id))
-                .catch(() => {})
+                .catch((err) => {
+                  // helper 内部已吞打开失败；这里只兜 getCurrent 本身的异常，
+                  // 留一条可排查的日志而不是完全静默
+                  console.error('[Popup] 打开侧边栏失败:', err);
+                })
             }
           >
             打开侧边栏
