@@ -267,18 +267,20 @@ describe('deepSeekAIService', () => {
     expect(noFallback[0]).toBeUndefined();
   });
 
-  it('成本统计按天累加，并只保留最近 30 天', async () => {
+  it('成本统计按天累加，并只保留最近 30 条（时钟无关）', async () => {
+    // fixture 用相对今天的合法日期（旧写法生成 2026-01-32 等非法日期，
+    // 且绝对日期在机器时间靠近 1 月时断言会碎）
+    const dayKey = (offset: number) => {
+      const d = new Date(Date.now() + offset * 86_400_000);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const dates = Array.from({ length: 35 }, (_, i) => dayKey(i - 34)); // 34 天前 → 今天
     const seeded: CostStats = {
       totalTokens: 5,
       totalCost: 0.5,
       classifyCount: 2,
       avgCostPerClassify: 0.25,
-      dailyStats: Array.from({ length: 35 }, (_, i) => ({
-        date: `2026-01-${String(i + 1).padStart(2, '0')}`,
-        tokens: 1,
-        cost: 0,
-        count: 1,
-      })),
+      dailyStats: dates.map((date) => ({ date, tokens: 1, cost: 0, count: 1 })),
     };
     (chrome.storage.local.get as Mock).mockImplementation(async (key: string) =>
       key === 'deepseekCostStats' ? { deepseekCostStats: seeded } : {}
@@ -293,8 +295,11 @@ describe('deepSeekAIService', () => {
     expect(stats.totalTokens).toBe(205);
     expect(stats.classifyCount).toBe(3);
     expect(stats.dailyStats).toHaveLength(30);
-    // 保留的是最近 30 天（最早的 6 条被裁掉）
-    expect(stats.dailyStats[0].date).toBe('2026-01-07');
+    // 今天与最后一条同日合并（35 条不变）→ 保留最后 30 条 = dates[5..34]
+    expect(stats.dailyStats[0].date).toBe(dates[5]);
+    expect(stats.dailyStats[29].date).toBe(dayKey(0));
+    // 今天那条合并了本次调用的 tokens（1 + 200）
+    expect(stats.dailyStats[29].tokens).toBe(201);
   });
 
   it('模型乱序返回/漏项时按 index 对位，不错配到相邻书签', async () => {

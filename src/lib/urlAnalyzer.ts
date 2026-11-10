@@ -18,7 +18,7 @@ export class UrlAnalyzer {
         domain,
         path,
         query,
-        isGitHub: this.isGitHub(domain, path),
+        isGitHub: this.isGitHub(domain),
         isStackOverflow: this.isStackOverflow(domain),
         isYouTube: this.isYouTube(domain),
         isDocumentation: this.isDocumentation(domain, path),
@@ -46,7 +46,7 @@ export class UrlAnalyzer {
     const info = this.analyze(url);
 
     if (info.isYouTube) return 'video';
-    if (info.isGitHub && info.path.includes('/')) return 'repository';
+    if (info.isGitHub) return 'repository';
     if (info.isStackOverflow) return 'forum';
     if (info.isDocumentation) return 'documentation';
     if (info.isBlog) return 'blog';
@@ -84,28 +84,11 @@ export class UrlAnalyzer {
   }
 
   /**
-   * 提取主要域名 (移除 www. 和子域名)
+   * 检查是否是 GitHub（仓库托管本身；*.github.io 是 Pages 站点——
+   * 个人博客/文档，不按代码库归类）
    */
-  extractRootDomain(url: string): string {
-    const domain = this.extractDomain(url);
-    const parts = domain.split('.');
-
-    // 对于类似 co.uk 的情况
-    if (parts.length >= 2) {
-      return parts.slice(-2).join('.');
-    }
-    return domain;
-  }
-
-  /**
-   * 检查是否是 GitHub
-   */
-  private isGitHub(domain: string, _path: string): boolean {
-    return (
-      domain === 'github.com' ||
-      domain === 'gist.github.com' ||
-      domain.endsWith('.github.io')
-    );
+  private isGitHub(domain: string): boolean {
+    return domain === 'github.com' || domain.endsWith('.github.com');
   }
 
   /**
@@ -116,10 +99,16 @@ export class UrlAnalyzer {
   }
 
   /**
-   * 检查是否是 YouTube
+   * 检查是否是 YouTube（含 www./m./music. 子域——规范形式
+   * 恰恰是 www.youtube.com，精确匹配会漏掉绝大多数书签）
    */
   private isYouTube(domain: string): boolean {
-    return domain === 'youtube.com' || domain === 'youtu.be';
+    return (
+      domain === 'youtube.com' ||
+      domain.endsWith('.youtube.com') ||
+      domain === 'youtu.be' ||
+      domain.endsWith('.youtu.be')
+    );
   }
 
   /**
@@ -129,6 +118,9 @@ export class UrlAnalyzer {
     const docIndicators = [
       '/docs/',
       '/doc/',
+      '/document/d/', // Google Docs
+      '/spreadsheets/d/', // Google Sheets
+      '/presentation/d/', // Google Slides
       '/documentation/',
       '/reference/',
       '/api/',
@@ -163,16 +155,23 @@ export class UrlAnalyzer {
   private isShoppingDomain(domain: string): boolean {
     const shoppingDomains = [
       'amazon.com',
-      'amazon.',
       'ebay.com',
-      'ebay.',
       'taobao.com',
       'tmall.com',
       'jd.com',
       'shopify.com',
     ];
 
-    return shoppingDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
+    return (
+      // 国际区域站（www.amazon.co.jp/de/co.uk、ebay.de/…）——
+      // 旧实现里 'amazon.' 后缀条目永假（hostname 不以点结尾）；
+      // 含 '.amazon.' 以覆盖 www./smile. 等子域前缀
+      domain.startsWith('amazon.') ||
+      domain.includes('.amazon.') ||
+      domain.startsWith('ebay.') ||
+      domain.includes('.ebay.') ||
+      shoppingDomains.some((d) => domain === d || domain.endsWith(`.${d}`))
+    );
   }
 
   /**
@@ -201,7 +200,6 @@ export class UrlAnalyzer {
       'canva.com',
       'notion.so',
       'trello.com',
-      'github.com',
       'gitlab.com',
       'bitbucket.org',
     ];

@@ -13,7 +13,7 @@ export interface CommandHandlerDeps {
   toggleFavoriteByUrl: (url: string) => Promise<boolean>;
   getCurrentPageInfo: typeof getCurrentPageInfo;
   queryActiveTab: (queryInfo: chrome.tabs.QueryInfo) => Promise<TabInfo[]>;
-  openSidePanel: (options: { windowId: number }) => Promise<void>;
+  openSidePanel: (options: { windowId?: number }) => Promise<void>;
 }
 
 export function createCommandHandler({
@@ -27,10 +27,11 @@ export function createCommandHandler({
     switch (command) {
       case 'open-sidepanel':
       case 'search-bookmarks': {
-        const [tab] = await queryActiveTab({ active: true, currentWindow: true });
-        if (tab?.windowId !== undefined) {
-          await openSidePanel({ windowId: tab.windowId });
-        }
+        // 查不到标签（全部窗口最小化等）也要尽力打开
+        const [tab] = await queryActiveTab({ active: true, currentWindow: true }).catch(
+          () => [] as TabInfo[]
+        );
+        await openSidePanel({ windowId: tab?.windowId });
         return;
       }
 
@@ -72,7 +73,9 @@ export function createDefaultCommandHandler(
     openSidePanel:
       deps.openSidePanel ??
       (async ({ windowId }) => {
-        await openSidePanelHelper(windowId);
+        // 上游没拿到 windowId 时（如全部窗口最小化）取当前窗口兜底
+        const realId = windowId ?? (await chrome.windows.getCurrent())?.id;
+        await openSidePanelHelper(realId);
       }),
   });
 }

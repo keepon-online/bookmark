@@ -21,9 +21,14 @@ export const OTHER_BOOKMARKS_ID = '2';
 // loadTree 每次刷新缓存；未加载过时退回 Chrome 默认值
 const resolvedRootIds: string[] = [];
 
-// 书签栏根（新建书签的默认父级）：优先用解析结果，Firefox 下是第一个根
+// 书签栏根（新建书签的默认父级）：Firefox 优先取 toolbar 前缀根
+// （根顺序无文档保证，不能假设第一个就是工具栏），其余环境取第一个根
 export function getBookmarkBarId(): string {
-  return resolvedRootIds[0] ?? BOOKMARK_BAR_ID;
+  return (
+    resolvedRootIds.find((id) => id.startsWith('toolbar')) ??
+    resolvedRootIds[0] ??
+    BOOKMARK_BAR_ID
+  );
 }
 
 // 全部根节点 id（书签栏/其他书签/移动书签等，用于"不可删/不可选"判定）

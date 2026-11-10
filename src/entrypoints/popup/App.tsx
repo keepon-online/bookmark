@@ -235,7 +235,12 @@ export function App() {
             variant="link"
             size="sm"
             className="h-auto p-0 text-xs"
-            onClick={() => void openSidePanel(chrome.windows?.WINDOW_ID_CURRENT)}
+            onClick={() =>
+              void chrome.windows
+                .getCurrent()
+                .then((win) => openSidePanel(win.id))
+                .catch(() => {})
+            }
           >
             打开侧边栏
           </Button>

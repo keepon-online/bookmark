@@ -18,8 +18,7 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 100,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'github.com' },
-      { type: 'domain', operator: 'endsWith', value: '.github.io' },
+      { type: 'domain', operator: 'endsWith', value: 'github.com' },
     ],
     actions: {
       tags: ['开发', '代码', 'GitHub'],
@@ -34,7 +33,7 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 100,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'stackoverflow.com' },
+      { type: 'domain', operator: 'endsWith', value: 'stackoverflow.com' },
     ],
     actions: {
       tags: ['开发', '问答', '技术'],
@@ -49,8 +48,8 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 90,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'youtube.com' },
-      { type: 'domain', operator: 'exact', value: 'youtu.be' },
+      { type: 'domain', operator: 'endsWith', value: 'youtube.com' },
+      { type: 'domain', operator: 'endsWith', value: 'youtu.be' },
     ],
     actions: {
       tags: ['视频'],
@@ -65,7 +64,7 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 90,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'bilibili.com' },
+      { type: 'domain', operator: 'endsWith', value: 'bilibili.com' },
     ],
     actions: {
       tags: ['视频', 'B站'],
@@ -134,12 +133,12 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 70,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'twitter.com' },
-      { type: 'domain', operator: 'exact', value: 'x.com' },
-      { type: 'domain', operator: 'exact', value: 'facebook.com' },
-      { type: 'domain', operator: 'exact', value: 'instagram.com' },
-      { type: 'domain', operator: 'exact', value: 'linkedin.com' },
-      { type: 'domain', operator: 'exact', value: 'reddit.com' },
+      { type: 'domain', operator: 'endsWith', value: 'twitter.com' },
+      { type: 'domain', operator: 'endsWith', value: 'x.com' },
+      { type: 'domain', operator: 'endsWith', value: 'facebook.com' },
+      { type: 'domain', operator: 'endsWith', value: 'instagram.com' },
+      { type: 'domain', operator: 'endsWith', value: 'linkedin.com' },
+      { type: 'domain', operator: 'endsWith', value: 'reddit.com' },
     ],
     actions: {
       tags: ['社交'],
@@ -154,7 +153,7 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 95,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'developer.mozilla.org' },
+      { type: 'domain', operator: 'endsWith', value: 'developer.mozilla.org' },
     ],
     actions: {
       tags: ['开发', '文档', 'MDN', 'Web'],
@@ -169,14 +168,14 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 85,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'react.dev' },
-      { type: 'domain', operator: 'exact', value: 'vuejs.org' },
+      { type: 'domain', operator: 'endsWith', value: 'react.dev' },
+      { type: 'domain', operator: 'endsWith', value: 'vuejs.org' },
       { type: 'domain', operator: 'endsWith', value: '.vuejs.org' },
-      { type: 'domain', operator: 'exact', value: 'angular.io' },
-      { type: 'domain', operator: 'exact', value: 'angular.dev' },
-      { type: 'domain', operator: 'exact', value: 'svelte.dev' },
-      { type: 'domain', operator: 'exact', value: 'nextjs.org' },
-      { type: 'domain', operator: 'exact', value: 'nuxt.com' },
+      { type: 'domain', operator: 'endsWith', value: 'angular.io' },
+      { type: 'domain', operator: 'endsWith', value: 'angular.dev' },
+      { type: 'domain', operator: 'endsWith', value: 'svelte.dev' },
+      { type: 'domain', operator: 'endsWith', value: 'nextjs.org' },
+      { type: 'domain', operator: 'endsWith', value: 'nuxt.com' },
     ],
     actions: {
       tags: ['开发', '前端', '框架'],
@@ -191,10 +190,10 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 80,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'tailwindcss.com' },
-      { type: 'domain', operator: 'exact', value: 'getbootstrap.com' },
-      { type: 'domain', operator: 'exact', value: 'ant.design' },
-      { type: 'domain', operator: 'exact', value: 'mui.com' },
+      { type: 'domain', operator: 'endsWith', value: 'tailwindcss.com' },
+      { type: 'domain', operator: 'endsWith', value: 'getbootstrap.com' },
+      { type: 'domain', operator: 'endsWith', value: 'ant.design' },
+      { type: 'domain', operator: 'endsWith', value: 'mui.com' },
     ],
     actions: {
       tags: ['开发', 'UI', '前端'],
@@ -209,12 +208,12 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 85,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'typescriptlang.org' },
-      { type: 'domain', operator: 'exact', value: 'nodejs.org' },
-      { type: 'domain', operator: 'exact', value: 'bun.sh' },
-      { type: 'domain', operator: 'exact', value: 'deno.land' },
-      { type: 'domain', operator: 'exact', value: 'vitejs.dev' },
-      { type: 'domain', operator: 'exact', value: 'webpack.js.org' },
+      { type: 'domain', operator: 'endsWith', value: 'typescriptlang.org' },
+      { type: 'domain', operator: 'endsWith', value: 'nodejs.org' },
+      { type: 'domain', operator: 'endsWith', value: 'bun.sh' },
+      { type: 'domain', operator: 'endsWith', value: 'deno.land' },
+      { type: 'domain', operator: 'endsWith', value: 'vitejs.dev' },
+      { type: 'domain', operator: 'endsWith', value: 'webpack.js.org' },
     ],
     actions: {
       tags: ['开发', '工具链', 'JavaScript'],
@@ -229,10 +228,10 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 85,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'go.dev' },
-      { type: 'domain', operator: 'exact', value: 'golang.org' },
-      { type: 'domain', operator: 'exact', value: 'rust-lang.org' },
-      { type: 'domain', operator: 'exact', value: 'python.org' },
+      { type: 'domain', operator: 'endsWith', value: 'go.dev' },
+      { type: 'domain', operator: 'endsWith', value: 'golang.org' },
+      { type: 'domain', operator: 'endsWith', value: 'rust-lang.org' },
+      { type: 'domain', operator: 'endsWith', value: 'python.org' },
     ],
     actions: {
       tags: ['开发', '编程语言'],
@@ -249,7 +248,7 @@ const DEFAULT_RULES: ClassificationRule[] = [
     conditions: [
       { type: 'domain', operator: 'endsWith', value: 'juejin.cn' },
       { type: 'domain', operator: 'endsWith', value: 'csdn.net' },
-      { type: 'domain', operator: 'exact', value: 'v2ex.com' },
+      { type: 'domain', operator: 'endsWith', value: 'v2ex.com' },
       { type: 'domain', operator: 'endsWith', value: 'segmentfault.com' },
       { type: 'domain', operator: 'endsWith', value: 'cnblogs.com' },
     ],
@@ -266,7 +265,7 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 80,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'notion.so' },
+      { type: 'domain', operator: 'endsWith', value: 'notion.so' },
       { type: 'domain', operator: 'endsWith', value: 'yuque.com' },
       { type: 'domain', operator: 'endsWith', value: 'wolai.com' },
       { type: 'domain', operator: 'endsWith', value: 'feishu.cn' },
@@ -284,10 +283,10 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 80,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'figma.com' },
-      { type: 'domain', operator: 'exact', value: 'canva.com' },
-      { type: 'domain', operator: 'exact', value: 'dribbble.com' },
-      { type: 'domain', operator: 'exact', value: 'behance.net' },
+      { type: 'domain', operator: 'endsWith', value: 'figma.com' },
+      { type: 'domain', operator: 'endsWith', value: 'canva.com' },
+      { type: 'domain', operator: 'endsWith', value: 'dribbble.com' },
+      { type: 'domain', operator: 'endsWith', value: 'behance.net' },
     ],
     actions: {
       tags: ['设计', '工具', '素材'],
@@ -302,11 +301,11 @@ const DEFAULT_RULES: ClassificationRule[] = [
     priority: 85,
     enabled: true,
     conditions: [
-      { type: 'domain', operator: 'exact', value: 'chatgpt.com' },
-      { type: 'domain', operator: 'exact', value: 'openai.com' },
-      { type: 'domain', operator: 'exact', value: 'claude.ai' },
-      { type: 'domain', operator: 'exact', value: 'deepseek.com' },
-      { type: 'domain', operator: 'exact', value: 'huggingface.co' },
+      { type: 'domain', operator: 'endsWith', value: 'chatgpt.com' },
+      { type: 'domain', operator: 'endsWith', value: 'openai.com' },
+      { type: 'domain', operator: 'endsWith', value: 'claude.ai' },
+      { type: 'domain', operator: 'endsWith', value: 'deepseek.com' },
+      { type: 'domain', operator: 'endsWith', value: 'huggingface.co' },
     ],
     actions: {
       tags: ['AI', '大模型', '工具'],
@@ -456,6 +455,7 @@ export class AIService {
         !this.isCommonWord(kw) &&   // 不是常见词
         !kw.includes('.') &&        // 不是文件扩展名
         !kw.includes('-') &&        // 不是复合词
+        !kw.includes('_') &&        // 同上：下划线连写的 slug
         !/^\d+$/.test(kw) &&        // 不是纯数字
         !/^[a-z]\d+$/.test(kw) &&   // 不是 "a1" 这种模式
         // 分词只按空白切，纯中文短语没有空格——5 字以上的纯中文
