@@ -202,13 +202,12 @@ export class HttpChecker {
         };
       }
 
-      // GET 请求顺带做软 404 检测（读取少量正文判断是否停放页，带 3s 超时防挂起）
+      // GET 请求顺带做软 404 检测（读取少量正文判断是否停放页）。
+      // 截止时间在 sniffSoft404 内部强制执行并取消 reader——外层
+      // race 只能让结果落败，救不了挂在 reader.read() 上的连接
       let soft404 = false;
       if (options.method === 'GET' && response.status === 200) {
-        soft404 = await Promise.race([
-          this.sniffSoft404(response),
-          sleep(3000).then(() => false),
-        ]);
+        soft404 = await this.sniffSoft404(response);
       } else {
         await releaseBody(response);
       }
@@ -260,23 +259,39 @@ export class HttpChecker {
    * 读取少量正文判断是否停放域名/软 404 页面。
    * 停放页体积极小且含出售特征词，二者同时满足才判定，
    * 避免把恰好包含关键词的正常页面误杀。
+   * 内部带截止时间：到点或读尽即取消 reader 释放连接——
+   * "先回 200 头、正文再无数据"的服务器会让 read() 无限挂起，
+   * 同域连接池被打满后殃及后续检查
    */
-  private async sniffSoft404(response: Response): Promise<boolean> {
+  private async sniffSoft404(response: Response, timeoutMs = 3000): Promise<boolean> {
     try {
       const reader = response.body?.getReader();
       if (!reader) {
         return false;
       }
+      const deadline = Date.now() + timeoutMs;
       const decoder = new TextDecoder();
       let text = '';
       let received = 0;
       while (received < SOFT404_MAX_SNIPPET_BYTES) {
-        const { done, value } = await reader.read();
-        if (done) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          await reader.cancel().catch(() => {});
+          return false;
+        }
+        const read = await Promise.race([
+          reader.read(),
+          sleep(remaining).then(() => 'deadline' as const),
+        ]);
+        if (read === 'deadline') {
+          await reader.cancel().catch(() => {});
+          return false;
+        }
+        if (read.done) {
           break;
         }
-        received += value.byteLength;
-        text += decoder.decode(value, { stream: true });
+        received += read.value.byteLength;
+        text += decoder.decode(read.value, { stream: true });
         if (received > SOFT404_MAX_PAGE_BYTES) {
           break;
         }

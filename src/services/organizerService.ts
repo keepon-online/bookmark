@@ -14,9 +14,12 @@ import {
 import { aiService } from './aiService';
 import { deepSeekAIService } from './deepseekAIService';
 import { generateId, getDomain, getUrlKey, now } from '@/lib/utils';
+import { createLogger } from '@/lib/logger';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 import type { Bookmark, ClassificationResult } from '@/types';
 import type { OrganizeChange, OrganizeHistory } from '@/types/organizer';
+
+const logger = createLogger('Organizer');
 
 // 单条整理建议
 export interface OrganizeSuggestion {
@@ -212,6 +215,24 @@ export class OrganizerService {
           }
         }
 
+        // 移动成功立即写入变更记录：若后续标签事务失败，这条 catch
+        // 跳过时移动也不能从历史里消失——否则书签已被移走、一键撤销
+        // 却对它永久失效
+        let change: OrganizeChange | undefined;
+        if (moved) {
+          change = {
+            bookmarkId: suggestion.node.id,
+            bookmarkTitle: suggestion.node.title || suggestion.node.url || '',
+            type: 'move',
+            from: originalParentId,
+            to: targetFolderId,
+            tags: { added: [], removed: [] },
+            confidence: suggestion.confidence,
+            reason: suggestion.reason,
+          };
+          changes.push(change);
+        }
+
         let appliedTags: string[] = [];
         if (suggestion.suggestedTags.length > 0) {
           // 事务内合并标签（并发写安全），并只记录**实际新增**的子集：
@@ -232,20 +253,22 @@ export class OrganizerService {
           result.tagged++;
         }
 
-        if (moved || appliedTags.length > 0) {
-          changes.push({
-            bookmarkId: suggestion.node.id,
-            bookmarkTitle: suggestion.node.title || suggestion.node.url || '',
-            type: moved ? 'move' : 'tag',
-            from: originalParentId,
-            to: targetFolderId,
-            tags: {
-              added: appliedTags,
-              removed: [],
-            },
-            confidence: suggestion.confidence,
-            reason: suggestion.reason,
-          });
+        if (appliedTags.length > 0) {
+          if (change) {
+            // 移动 + 标签：补充到同一条变更（rollback 一次还原两者）
+            change.tags = { added: appliedTags, removed: [] };
+          } else {
+            changes.push({
+              bookmarkId: suggestion.node.id,
+              bookmarkTitle: suggestion.node.title || suggestion.node.url || '',
+              type: 'tag',
+              from: undefined,
+              to: undefined,
+              tags: { added: appliedTags, removed: [] },
+              confidence: suggestion.confidence,
+              reason: suggestion.reason,
+            });
+          }
         }
 
         result.applied++;
@@ -379,6 +402,37 @@ export class OrganizerService {
         rolledBack: true,
         rolledBackAt: now(),
       });
+
+      // 回收本次涉及域名的学习规则：用户明确撤销的分类不能以 0.9
+      // 置信度持续复现，且学习规则会抢先 AI，不删就永远没机会重学
+      try {
+        const snapshot = await browserBookmarks.loadTree();
+        const byId = new Map(snapshot.bookmarks.map((node) => [node.id, node]));
+        const domains = new Set<string>();
+        for (const change of history.changes) {
+          const url = byId.get(change.bookmarkId)?.url;
+          const domain = url ? getDomain(url).toLowerCase() : '';
+          if (domain) {
+            domains.add(domain);
+          }
+        }
+        if (domains.size > 0) {
+          const learned = await loadLearnedRules();
+          let touched = false;
+          for (const domain of domains) {
+            if (learned[domain]) {
+              delete learned[domain];
+              touched = true;
+            }
+          }
+          if (touched) {
+            await saveLearnedRules(learned);
+          }
+        }
+      } catch (error) {
+        // 规则回收失败不影响撤销本身
+        logger.warn('Rollback: 清理学习规则失败', error);
+      }
     }
 
     return res;

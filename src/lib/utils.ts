@@ -69,8 +69,21 @@ export function getDomain(url: string): string {
   return parsed?.hostname || url;
 }
 
-// 获取 favicon URL
+// 书签 URL 是外部可控数据（账号同步/导入备份）：只有 http/ https/
+// 才允许进入 window.open 与 <a href>，javascript: 等协议直接拒开
+export function isHttpUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  return /^https?:\/\//i.test(url);
+}
+
+// 获取 favicon URL。
+// 扩展环境用 Chrome 内建的 _favicon 端点本地取图——把每个书签的域名
+// 发给 Google favicon 服务等于打开侧栏就上报整个书签库的域名集合。
+// 非扩展环境（测试）退回 Google 源
 export function getFaviconUrl(url: string, size = 32): string {
+  if (typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
+    return `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&sz=${size}`;
+  }
   const domain = getDomain(url);
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=${size}`;
 }

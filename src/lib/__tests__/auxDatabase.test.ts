@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
-import { auxDb, ORPHAN_META_TTL_MS, reconcileMeta } from '@/lib/auxDatabase';
+import { auxDb, ORPHAN_META_TTL_MS, reconcileMeta, importAuxData } from '@/lib/auxDatabase';
 import { getUrlKey } from '@/lib/utils';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 
@@ -165,5 +165,77 @@ describe('reconcileMeta', () => {
       pending: 0,
       merged: 0,
     });
+  });
+});
+
+describe('reconcileMeta 写入去重（回归）', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await auxDb.delete();
+    await auxDb.open();
+  });
+
+  it('合并结果不被同主键的 urlKey 回填覆盖（孤儿主键在前）', async () => {
+    const liveUrl = 'https://same.example.com/page';
+    const key = getUrlKey(liveUrl);
+    // 孤儿行主键字典序在前（删除的通常是老节点）；存活行树上 URL
+    // 已改成同 urlKey，但存储的 urlKey 还是旧值（待回填）——两行都会
+    // 产生同主键（z-live）的写入，后写不得覆盖合并结果
+    await auxDb.bookmarkMeta.bulkPut([
+      meta('a-orphan', { tags: ['孤儿标签'], isFavorite: true, visitCount: 3, urlKey: key }),
+      meta('z-live', { tags: ['存活标签'], visitCount: 1, urlKey: 'old.example.com/other' }),
+    ]);
+
+    const { merged } = await reconcileMeta([node('z-live', liveUrl)]);
+
+    expect(merged).toBe(1);
+    const row = await auxDb.bookmarkMeta.get('z-live');
+    expect(row?.tags).toEqual(['存活标签', '孤儿标签']);
+    expect(row?.isFavorite).toBe(true);
+    expect(row?.visitCount).toBe(4);
+    expect(row?.urlKey).toBe(key);
+    expect(await auxDb.bookmarkMeta.get('a-orphan')).toBeUndefined();
+  });
+
+  it('rebound 认领后，同 urlKey 的后续孤儿继续链式合并', async () => {
+    const url = 'https://chain.example.com/a';
+    const key = getUrlKey(url);
+    await auxDb.bookmarkMeta.bulkPut([
+      meta('a1', { tags: ['A'], urlKey: key }),
+      meta('a2', { tags: ['B'], urlKey: key }),
+    ]);
+
+    // 存活书签无元数据：第一个孤儿认领，第二个应并进同一份结果
+    // （认领结果不回写索引时，第二个会落入 pending、90 天后被清掉）
+    const { rebound, merged } = await reconcileMeta([node('n-live', url)]);
+
+    expect(rebound).toBe(1);
+    expect(merged).toBe(1);
+    const row = await auxDb.bookmarkMeta.get('n-live');
+    expect(row?.tags).toEqual(['A', 'B']);
+    expect(await auxDb.bookmarkMeta.get('a1')).toBeUndefined();
+    expect(await auxDb.bookmarkMeta.get('a2')).toBeUndefined();
+  });
+
+  it('importAuxData 对脏行做字段规范化，无主键行丢弃', async () => {
+    await importAuxData({
+      version: 1,
+      exportedAt: 0,
+      bookmarkMeta: [
+        { bookmarkId: 'ok', tags: ['合法'], isFavorite: true, visitCount: 2 },
+        { bookmarkId: 'dirty', isFavorite: true },
+        { tags: ['无主键'] },
+      ] as AuxBookmarkMeta[],
+      linkChecks: [],
+      organizeHistory: [],
+    });
+
+    expect((await auxDb.bookmarkMeta.get('ok'))?.tags).toEqual(['合法']);
+    // 缺 tags 的脏行补默认形状，不再让渲染路径抛 TypeError
+    const dirty = await auxDb.bookmarkMeta.get('dirty');
+    expect(dirty?.tags).toEqual([]);
+    expect(dirty?.isFavorite).toBe(true);
+    expect(dirty?.visitCount).toBe(0);
+    expect(await auxDb.bookmarkMeta.count()).toBe(2);
   });
 });

@@ -457,7 +457,10 @@ export class AIService {
         !kw.includes('.') &&        // 不是文件扩展名
         !kw.includes('-') &&        // 不是复合词
         !/^\d+$/.test(kw) &&        // 不是纯数字
-        !/^[a-z]\d+$/.test(kw)      // 不是 "a1" 这种模式
+        !/^[a-z]\d+$/.test(kw) &&   // 不是 "a1" 这种模式
+        // 分词只按空白切，纯中文短语没有空格——5 字以上的纯中文
+        // "关键词"实际是半句标题，不该成为标签
+        !/^[\u4e00-\u9fa5]{5,}$/.test(kw)
     );
 
     // 按长度和重要性排序，取前 3 个
@@ -571,23 +574,35 @@ export class AIService {
     if (!caseSensitive) {
       target = target.toLowerCase();
       const conditionValue = value.toLowerCase();
-      return this.evaluateOperator(target, conditionValue, operator);
+      return this.evaluateOperator(target, conditionValue, operator, type);
     }
 
-    return this.evaluateOperator(target, value, operator);
+    return this.evaluateOperator(target, value, operator, type);
   }
 
   /**
-   * 评估操作符
+   * 评估操作符。domain 类型的 endsWith 强制点边界：
+   * 'amazon.com' 不能命中 'myamazon.com'（'xx.github.io' 这类
+   * 已带前导点的值不受影响）
    */
-  private evaluateOperator(target: string, value: string, operator: ClassificationRule['conditions'][0]['operator']): boolean {
+  private evaluateOperator(
+    target: string,
+    value: string,
+    operator: ClassificationRule['conditions'][0]['operator'],
+    conditionType?: ClassificationRule['conditions'][0]['type']
+  ): boolean {
     switch (operator) {
       case 'contains':
         return target.includes(value);
       case 'startsWith':
         return target.startsWith(value);
-      case 'endsWith':
+      case 'endsWith': {
+        if (conditionType === 'domain') {
+          const suffix = value.startsWith('.') ? value : `.${value}`;
+          return target === value || target.endsWith(suffix);
+        }
         return target.endsWith(value);
+      }
       case 'exact':
         return target === value;
       case 'regex':

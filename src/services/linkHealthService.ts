@@ -135,6 +135,26 @@ function isRootUrl(url: string): boolean {
 // 深度复核结论：ok 页面真实加载成功；dead 浏览器报错页；unknown 超时/环境不支持
 export type DeepVerifyOutcome = 'ok' | 'dead' | 'unknown';
 
+// 本上下文仍开着的复核标签页：popup/sidepanel 在导航中途被关闭时
+// 页面上下文直接销毁，靠 pagehide 兜底关闭，避免后台标签页永久残留
+const activeVerifyTabs = new Set<number>();
+let verifyTabsCleanupBound = false;
+
+function closeActiveVerifyTabs(): void {
+  for (const tabId of activeVerifyTabs) {
+    chrome.tabs.remove(tabId).catch(() => {});
+  }
+  activeVerifyTabs.clear();
+}
+
+function bindVerifyTabsCleanup(): void {
+  if (verifyTabsCleanupBound || typeof window === 'undefined') {
+    return;
+  }
+  window.addEventListener('pagehide', closeActiveVerifyTabs);
+  verifyTabsCleanupBound = true;
+}
+
 // 后台真实导航复核：用 chrome.tabs 开不可见标签页真实加载 URL。
 // 完整浏览器上下文（Cookie、TLS 指纹、JS 挑战）是扩展内 fetch 无法
 // 复制的——WAF 拦截的站点 fetch 拿 52x，真实导航通常正常打开。
@@ -143,6 +163,7 @@ export async function deepVerifyUrl(url: string, timeoutMs = 15000): Promise<Dee
   if (typeof chrome === 'undefined' || !chrome.tabs?.create || !chrome.tabs.onUpdated) {
     return 'unknown';
   }
+  bindVerifyTabsCleanup();
   return new Promise((resolve) => {
     let tabId: number | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -167,6 +188,7 @@ export async function deepVerifyUrl(url: string, timeoutMs = 15000): Promise<Dee
       }
       chrome.tabs.onUpdated.removeListener(listener);
       if (tabId !== undefined) {
+        activeVerifyTabs.delete(tabId);
         chrome.tabs.remove(tabId).catch(() => {});
       }
     };
@@ -189,6 +211,7 @@ export async function deepVerifyUrl(url: string, timeoutMs = 15000): Promise<Dee
           return;
         }
         tabId = tab.id;
+        activeVerifyTabs.add(tabId);
         timer = setTimeout(() => finish('unknown'), timeoutMs);
       })
       .catch(() => finish('unknown'));
@@ -423,6 +446,12 @@ export class LinkHealthService {
                 classifyLinkStatus(check.status) === 'broken'
               ) {
                 await sleep(Math.max(domainQueue.intervalMs, SAME_DOMAIN_INTERVAL_MS));
+                if (this.stopRequested) {
+                  // 停止请求：条目放回队列（busy 由 finally 释放），
+                  // 外层循环随即退出，不补发 GET
+                  domainQueue.next--;
+                  return;
+                }
                 const verified = await httpChecker.check(item.node.url!, {
                   timeout: options.timeout,
                   retries: options.retries,
@@ -463,6 +492,7 @@ export class LinkHealthService {
               errorMessage: check.errorMessage,
               checkedAt: check.checkedAt,
               networkError: check.networkError || undefined,
+              errorKind: check.networkError ? check.errorKind : undefined,
             };
             await auxDb.linkChecks.add(record);
 
@@ -474,10 +504,14 @@ export class LinkHealthService {
             if (check.networkError) {
               const errorKind = check.errorKind ?? 'network';
               if (errorKind === 'timeout' || errorKind === 'network') {
-                // 连续多轮无法连接才标 unreachable
+                // 连续多轮无法连接才标 unreachable。只有同类失败计数：
+                // blocked（无权限）/ssl（证书）是环境问题，不计入连击；
+                // 旧记录无 errorKind 时不计（宁可多查一轮也不误标）
                 const history = await this.recentRecords(item.node.id, record, UNREACHABLE_THRESHOLD);
+                const countsToward = (r: LinkCheckRecord) =>
+                  r.networkError && (r.errorKind === 'timeout' || r.errorKind === 'network');
                 const consecutive = history.filter(
-                  (r, i) => r.networkError && (i === 0 || history[i - 1].networkError)
+                  (r, i) => countsToward(r) && (i === 0 || countsToward(history[i - 1]))
                 ).length;
                 if (1 + consecutive >= UNREACHABLE_THRESHOLD) {
                   newStatus = 'unreachable';
@@ -590,6 +624,24 @@ export class LinkHealthService {
             // 其余 worker 变成僵尸继续消费旧队列，且 running=false 期间
             // 可再启新一轮造成两轮并发。记录后让本 worker 干净退出
             logger.error('Check item failed', item?.node.url ?? '', error);
+            if (item) {
+              // 该条按跳过计数并推进进度，保证进度条最终闭合
+              completed++;
+              skipped++;
+              onProgress?.({
+                total: pending.length,
+                completed,
+                current: item.node.title || item.node.url!,
+                success,
+                failed,
+                skipped,
+                startTime,
+                estimatedRemaining:
+                  completed > 0
+                    ? ((now() - startTime) / completed) * (pending.length - completed)
+                    : undefined,
+              });
+            }
             return;
           } finally {
             domainQueue.busy = false;

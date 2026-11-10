@@ -19,6 +19,9 @@ export interface LinkCheckRecord {
   checkedAt: number;
   // 网络层失败标记（未获得 HTTP 响应），用于"连续无法连接"判定
   networkError?: boolean;
+  // 网络层失败类别（timeout/network/ssl/blocked）：blocked/ssl 是环境
+  // 问题，不应计入 unreachable 连击
+  errorKind?: string;
 }
 
 export class AuxDatabase extends Dexie {
@@ -148,16 +151,25 @@ export async function reconcileMeta(
     claimable.set(urlKey, candidates);
   }
 
-  const puts: AuxBookmarkMeta[] = [];
+  // 写入集合按主键去重：同一行可能同时命中多个分支（如存活行的 urlKey
+  // 回填 + 同 urlKey 孤儿的合并结果），bulkPut 后写覆盖先写会把合并
+  // 结果静默抹掉。Map 语义：同键后写覆盖前写，且各分支写入前先与
+  // 已有待写内容合并，保证任一分支的结果不丢
+  const putsByKey = new Map<string, AuxBookmarkMeta>();
   const deletes: string[] = [];
+
+  const stagePut = (row: AuxBookmarkMeta) => {
+    putsByKey.set(row.bookmarkId, row);
+  };
 
   for (const meta of all) {
     const liveUrlKey = urlKeyById.get(meta.bookmarkId);
 
-    // 1) 书签还在：补齐 urlKey
+    // 1) 书签还在：补齐 urlKey（若该行已被合并结果占用，只补 urlKey）
     if (liveUrlKey) {
       if (meta.urlKey !== liveUrlKey) {
-        puts.push({ ...meta, urlKey: liveUrlKey, orphanedAt: undefined });
+        const pending = putsByKey.get(meta.bookmarkId);
+        stagePut({ ...(pending ?? meta), urlKey: liveUrlKey, orphanedAt: undefined });
         result.backfilled++;
       }
       continue;
@@ -167,7 +179,10 @@ export async function reconcileMeta(
     if (meta.urlKey) {
       const target = claimable.get(meta.urlKey)?.shift();
       if (target) {
-        puts.push({ ...meta, bookmarkId: target, orphanedAt: undefined });
+        const claimed = { ...meta, bookmarkId: target, orphanedAt: undefined };
+        stagePut(claimed);
+        // 同步认领索引：同 urlKey 的后续孤儿才能链式合并进这份结果
+        liveMetaByUrlKey.set(meta.urlKey, claimed);
         deletes.push(meta.bookmarkId);
         result.rebound++;
         continue;
@@ -177,10 +192,13 @@ export async function reconcileMeta(
       const existing = liveMetaByUrlKey.get(meta.urlKey);
       if (existing) {
         const merged = mergeMeta(existing, meta);
-        puts.push(merged);
+        // 合并结果必然属于正确的 urlKey 家族，显式写入避免沿用
+        // existing 行上尚未回填的旧 urlKey
+        const row = { ...merged, urlKey: meta.urlKey };
+        stagePut(row);
         deletes.push(meta.bookmarkId);
         // 同一 urlKey 的后续孤儿继续并进这份结果
-        liveMetaByUrlKey.set(meta.urlKey, merged);
+        liveMetaByUrlKey.set(meta.urlKey, row);
         result.merged++;
         continue;
       }
@@ -192,7 +210,7 @@ export async function reconcileMeta(
         result.removed++;
       } else {
         if (meta.orphanedAt !== orphanedAt) {
-          puts.push({ ...meta, orphanedAt });
+          stagePut({ ...meta, orphanedAt });
         }
         result.pending++;
       }
@@ -204,6 +222,7 @@ export async function reconcileMeta(
     result.removed++;
   }
 
+  const puts = [...putsByKey.values()];
   if (puts.length > 0) {
     await auxDb.bookmarkMeta.bulkPut(puts);
   }
@@ -243,13 +262,35 @@ export async function exportAuxData(): Promise<AuxExportData> {
   };
 }
 
+// 导入的元数据行是不可信的外部数据（手工编辑过的备份/旧版本导出），
+// 缺字段会让渲染路径（record.tags 遍历等）直接抛 TypeError。
+// 逐行规范化并丢弃没有主键的行，避免导入后白屏
+function normalizeImportedMeta(row: unknown): AuxBookmarkMeta | null {
+  if (!row || typeof row !== 'object') return null;
+  const r = row as Record<string, unknown>;
+  const bookmarkId = r.bookmarkId;
+  if (typeof bookmarkId !== 'string' || !bookmarkId) return null;
+  return {
+    ...r,
+    bookmarkId,
+    tags: Array.isArray(r.tags) ? r.tags.filter((t): t is string => typeof t === 'string') : [],
+    isFavorite: Boolean(r.isFavorite),
+    visitCount: typeof r.visitCount === 'number' ? r.visitCount : 0,
+  } as AuxBookmarkMeta;
+}
+
 // 导入元数据（合并写入，不覆盖未涉及的记录；学习规则按 key 合并，导入方优先）
 export async function importAuxData(data: AuxExportData): Promise<void> {
   if (data.version !== 1) {
     throw new Error('Unsupported aux data version');
   }
   if (data.bookmarkMeta?.length) {
-    await auxDb.bookmarkMeta.bulkPut(data.bookmarkMeta);
+    const rows = data.bookmarkMeta
+      .map(normalizeImportedMeta)
+      .filter((row): row is AuxBookmarkMeta => row !== null);
+    if (rows.length > 0) {
+      await auxDb.bookmarkMeta.bulkPut(rows);
+    }
   }
   if (data.linkChecks?.length) {
     await auxDb.linkChecks.bulkPut(data.linkChecks);

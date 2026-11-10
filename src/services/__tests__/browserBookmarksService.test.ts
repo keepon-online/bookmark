@@ -237,8 +237,9 @@ describe('browserBookmarksService', () => {
     const bookmarks = [bookmark('112', '11')]; // '11' 有书签，'12' 与 '2' 为空
 
     const empty = BrowserBookmarksService.findEmptyFolders(folders, bookmarks);
-    // '12' 是叶子空文件夹；'2' 无子无书签；'1' 有子文件夹，不算空
-    expect(empty.map((folderNode) => folderNode.id).sort()).toEqual(['12', '2']);
+    // '12' 是叶子空文件夹；根节点（'1' 书签栏 /'2' 其他书签）不可删，
+    // 即使为空也不能列入——removeTree 对根必然抛错
+    expect(empty.map((folderNode) => folderNode.id).sort()).toEqual(['12']);
   });
 
   it('subscribe 注册全部事件监听，取消订阅后全部移除', () => {

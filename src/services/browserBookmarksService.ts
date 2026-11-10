@@ -271,13 +271,18 @@ export class BrowserBookmarksService {
     return duplicates;
   }
 
-  // 检测空文件夹（叶子文件夹优先返回）
+  // 检测空文件夹（叶子文件夹优先返回）。
+  // 根节点（书签栏/其他书签）不可删：removeTree 对根必然抛错，
+  // 混进结果会让"删除所选"中途失败
   static findEmptyFolders(folders: BrowserBookmarkNode[], bookmarks: BrowserBookmarkNode[]): BrowserBookmarkNode[] {
+    const protectedRoots = new Set([BOOKMARK_BAR_ID, OTHER_BOOKMARKS_ID]);
     const foldersWithBookmarks = new Set(bookmarks.map((b) => b.parentId));
     const foldersWithChildren = new Set(folders.map((f) => f.parentId));
     return folders.filter(
       (folder) =>
-        !foldersWithBookmarks.has(folder.id) && !foldersWithChildren.has(folder.id)
+        !protectedRoots.has(folder.id) &&
+        !foldersWithBookmarks.has(folder.id) &&
+        !foldersWithChildren.has(folder.id)
     );
   }
 }

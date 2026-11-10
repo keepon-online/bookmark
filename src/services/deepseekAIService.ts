@@ -357,7 +357,7 @@ export class DeepSeekAIService {
       }
 
       // 避免速率限制，批次间延迟
-      if (i + batchSize < uncachedBookmarks.length) {
+      if (i + validBatchSize < uncachedBookmarks.length) {
         await this.delay(500);
       }
     }
@@ -434,6 +434,33 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
   }
 
   /**
+   * 把 LLM 返回的单个结果对象收敛成合法形状。
+   * 模型常给出 "confidence": "0.9"（字符串，绕过阈值比较）或
+   * "suggestedTags": "标签1、标签2"（字符串，令下游 .filter 崩溃），
+   * 只兜 falsy 不够，必须逐字段校验类型
+   */
+  private normalizeLlmItem(item: any): LLMClassificationResult {
+    const confidenceNum = Number(item?.confidence);
+    return {
+      suggestedTags: Array.isArray(item?.suggestedTags)
+        ? item.suggestedTags.filter((t: unknown): t is string => typeof t === 'string')
+        : [],
+      suggestedFolder: typeof item?.suggestedFolder === 'string' ? item.suggestedFolder : undefined,
+      contentType: typeof item?.contentType === 'string' ? item.contentType : 'other',
+      confidence:
+        Number.isFinite(confidenceNum) && confidenceNum > 0
+          ? Math.min(confidenceNum, 1)
+          : item?.confidence
+            ? 0.5
+            : 0.5,
+      reasoning: typeof item?.reasoning === 'string' ? item.reasoning : '',
+      alternativeTags: Array.isArray(item?.alternativeTags) ? item.alternativeTags : [],
+      alternativeFolders: Array.isArray(item?.alternativeFolders) ? item.alternativeFolders : [],
+      method: 'llm' as const,
+    } as LLMClassificationResult;
+  }
+
+  /**
    * 解析批量分类响应。
    * 模型可能乱序返回或漏项：优先按每项携带的 1-based index 对位，
    * 缺失 index 时退回位置对齐；漏掉的槽位由调用方用默认结果兜底——
@@ -455,18 +482,9 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
 
       const byIndex: (LLMClassificationResult | null)[] = new Array(expectedCount).fill(null);
       parsed.forEach((item: any, position: number) => {
-        const result = {
-          suggestedTags: item.suggestedTags || [],
-          suggestedFolder: item.suggestedFolder,
-          contentType: item.contentType || 'other',
-          confidence: item.confidence || 0.5,
-          reasoning: item.reasoning || '',
-          alternativeTags: item.alternativeTags || [],
-          alternativeFolders: item.alternativeFolders || [],
-          method: 'llm' as const,
-        } as LLMClassificationResult;
+        const result = this.normalizeLlmItem(item);
         const slot =
-          typeof item.index === 'number' && Number.isInteger(item.index) &&
+          typeof item?.index === 'number' && Number.isInteger(item.index) &&
           item.index >= 1 && item.index <= expectedCount
             ? item.index - 1
             : position < expectedCount
@@ -517,16 +535,7 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
 
       const parsed = JSON.parse(jsonMatch[0]);
 
-      return {
-        suggestedTags: parsed.suggestedTags || [],
-        suggestedFolder: parsed.suggestedFolder,
-        contentType: parsed.contentType || 'other',
-        confidence: parsed.confidence || 0.5,
-        reasoning: parsed.reasoning || '',
-        alternativeTags: parsed.alternativeTags || [],
-        alternativeFolders: parsed.alternativeFolders || [],
-        method: 'llm',
-      };
+      return this.normalizeLlmItem(parsed);
     } catch (error) {
       logger.error('Failed to parse response', content);
       // 返回默认结果
@@ -556,11 +565,16 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
     try {
       const cached = await chrome.storage.local.get('deepseekClassificationCache');
       if (cached.deepseekClassificationCache) {
+        const nowTs = Date.now();
         this.cache = new Map(
-          Object.entries(cached.deepseekClassificationCache).map(([key, value]) => [
-            key,
-            value as ClassificationCache,
-          ])
+          Object.entries(cached.deepseekClassificationCache)
+            // 淘汰过期条目：读入时不删会让它们随 saveCache 永远写回，
+            // folderTree 参与键后每次目录变化还会铸造全套新键
+            .filter(([, value]) => {
+              const entry = value as ClassificationCache;
+              return typeof entry?.expiresAt === 'number' && entry.expiresAt > nowTs;
+            })
+            .map(([key, value]) => [key, value as ClassificationCache])
         );
       }
     } catch (error) {
@@ -573,7 +587,10 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
    */
   private async saveCache(): Promise<void> {
     try {
-      const cacheObj = Object.fromEntries(this.cache.entries());
+      const nowTs = Date.now();
+      const cacheObj = Object.fromEntries(
+        [...this.cache.entries()].filter(([, value]) => value.expiresAt > nowTs)
+      );
       await chrome.storage.local.set({
         deepseekClassificationCache: cacheObj,
       });

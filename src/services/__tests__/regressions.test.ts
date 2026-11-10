@@ -510,6 +510,29 @@ describe('regressions', () => {
     expect(exempt?.lastErrorMessage).toContain('防护拦截');
   });
 
+  it('blocked（无权限）失败不计入 unreachable 连击', async () => {
+    const node = makeNode('bookmark-blocked-streak', 'https://streak.example.com/page');
+
+    // 两轮无主机权限的失败（环境问题，不该累计连击）
+    vi.stubGlobal('chrome', {
+      permissions: { contains: vi.fn().mockResolvedValue(false) },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await linkHealthService.checkBookmarks([node], { retries: 0, force: true });
+    await linkHealthService.checkBookmarks([node], { retries: 0, force: true });
+
+    // 第三轮已授权但超时：1 次真实超时 + 2 条 blocked 历史不达标
+    vi.stubGlobal('chrome', {
+      permissions: { contains: vi.fn().mockResolvedValue(true) },
+    });
+    const abortError = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortError));
+    await linkHealthService.checkBookmarks([node], { retries: 0, force: true });
+
+    const meta = await auxDb.bookmarkMeta.get('bookmark-blocked-streak');
+    expect(meta?.linkStatus).toBeUndefined();
+  });
+
   it('深度复核与批量检查互斥：任一进行中另一方直接抛错', async () => {
     // 检查进行中 → deepVerify 拒绝
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {

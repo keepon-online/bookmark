@@ -344,4 +344,29 @@ describe('deepSeekAIService', () => {
     expect(results[0]).toMatchObject({ suggestedFolder: 'F1' });
     expect(results[1]).toMatchObject({ suggestedFolder: 'F2' });
   });
+
+  it('字段类型收敛：字符串 confidence/字符串 tags/非字符串 folder 不再透传', async () => {
+    await deepSeekAIService.clearCache();
+    await deepSeekAIService.initialize(config());
+
+    chatCompletions.mockResolvedValue(
+      llmResponse(
+        JSON.stringify([
+          { index: 1, suggestedTags: '标签1、标签2', suggestedFolder: 123, confidence: '0.95' },
+        ])
+      )
+    );
+
+    const results = await deepSeekAIService.batchClassify(
+      [bookmark('t1', 'https://t1.com/')],
+      { batchSize: 10 }
+    );
+
+    // 字符串 tags 收敛为空数组（下游 .filter 不再崩溃）
+    expect(results[0].suggestedTags).toEqual([]);
+    // 非字符串 folder 丢弃
+    expect(results[0].suggestedFolder).toBeUndefined();
+    // 字符串 confidence 数值化：NaN 比较绕过阈值的问题消除
+    expect(results[0].confidence).toBe(0.95);
+  });
 });

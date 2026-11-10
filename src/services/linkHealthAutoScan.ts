@@ -29,7 +29,10 @@ export const AUTO_SCAN_PROGRESS_KEY = 'linkHealthAutoScanProgress';
 // 每次闹钟最多检查多少条（决定单次运行时长，太大就有被 SW 杀掉的风险）
 export const AUTO_SCAN_BATCH_SIZE = 40;
 // 上一次运行的"仍在进行"标记超过这个时长即视为已死，允许重新开始
-export const AUTO_SCAN_STALE_MS = 5 * 60_000;
+// “上一批还活着”的判定窗口：必须覆盖用户可配置的最差批次时长——
+// timeout=30s × (retries=3+1) 次尝试 + 退避 ≈ 单条 127s，一批 40 条
+// / 并发 5 ≈ 17 分钟。取 20 分钟，小于它会把活批次误判成已死
+export const AUTO_SCAN_STALE_MS = 20 * 60_000;
 // 间隔下限（小时）
 export const AUTO_SCAN_MIN_INTERVAL_HOURS = 1;
 
