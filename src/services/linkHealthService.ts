@@ -29,6 +29,53 @@ import type { BatchCheckOptions, CheckProgress, LinkCheckResult, LinkHealthRepor
 
 const logger = createLogger('LinkHealth');
 
+// —— 跨上下文扫描互斥 ——
+// running 单例只在各上下文（sidepanel/popup/options/background）内有效，
+// 后台定时扫描与手动检查并发时：同一书签同轮双写记录，会把对方几秒前
+// 同轮的失效记录当作"上一轮也失效"，一次瞬时故障即写死链。用
+// storage.local 上的租约锁互斥，TTL 覆盖最差批次（超时自动失效，
+// 持有者被杀不会死锁）
+const SCAN_LOCK_KEY = 'linkHealthScanLock';
+const SCAN_LOCK_TTL_MS = 90 * 60_000;
+const SCAN_LOCK_OWNER = `ctx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+interface ScanLock {
+  owner: string;
+  since: number;
+}
+
+async function acquireScanLock(): Promise<boolean> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) {
+    return true; // 测试环境：无跨上下文并发
+  }
+  try {
+    const stored = (await chrome.storage.local.get(SCAN_LOCK_KEY)) as Record<string, unknown>;
+    const lock = stored?.[SCAN_LOCK_KEY] as ScanLock | undefined;
+    if (lock && lock.owner !== SCAN_LOCK_OWNER && Date.now() - lock.since < SCAN_LOCK_TTL_MS) {
+      return false;
+    }
+    await chrome.storage.local.set({ [SCAN_LOCK_KEY]: { owner: SCAN_LOCK_OWNER, since: Date.now() } });
+    return true;
+  } catch {
+    return true; // storage 不可用（如被策略禁用）：退化为无锁
+  }
+}
+
+async function releaseScanLock(): Promise<void> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local?.get) {
+    return;
+  }
+  try {
+    const stored = (await chrome.storage.local.get(SCAN_LOCK_KEY)) as Record<string, unknown>;
+    const lock = stored?.[SCAN_LOCK_KEY] as ScanLock | undefined;
+    if (lock?.owner === SCAN_LOCK_OWNER) {
+      await chrome.storage.local.remove(SCAN_LOCK_KEY);
+    }
+  } catch {
+    // 释放失败由 TTL 兜底
+  }
+}
+
 const DEFAULT_CONCURRENCY = 5;// 同域名两次请求的最小间隔（毫秒）
 const SAME_DOMAIN_INTERVAL_MS = 250;
 // 同域名遇到限流时间隔的上限（毫秒）
@@ -323,10 +370,17 @@ export class LinkHealthService {
     if (this.running) {
       throw new Error('已有检查正在进行中，请先停止或等待完成');
     }
+    // running 必须在任何 await 之前同步置位：本上下文内的再次进入
+    // 靠它挡住，跨上下文靠下面的租约锁
     this.running = true;
     this.stopRequested = false;
 
     try {
+      // 跨上下文互斥（storage 租约锁）：防止后台定时扫描与手动检查并发。
+      // 获取失败抛错由 finally 统一复位 running 并释放（未持有的锁不会误删）
+      if (!(await acquireScanLock())) {
+        throw new Error('另一个窗口正在检查（如后台定时扫描），请稍后再试');
+      }
       const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
 
       // 预取元数据，再交给与定时自动扫描共用的筛选函数决定哪些真的要检查
@@ -659,6 +713,7 @@ export class LinkHealthService {
     } finally {
       this.running = false;
       this.stopRequested = false;
+      await releaseScanLock();
       // 历史记录滚动清理（保留 30 天）：每次扫描收尾顺带执行，
       // 避免 linkChecks 无限增长拖慢历史查询与逼近存储配额
       try {
@@ -692,9 +747,13 @@ export class LinkHealthService {
     if (this.running) {
       throw new Error('已有检查正在进行中，请先停止或等待完成');
     }
+    // running 先行同步置位（与 checkBookmarks 同理），跨上下文靠租约锁
     this.running = true;
     this.stopRequested = false;
     try {
+      if (!(await acquireScanLock())) {
+        throw new Error('另一个窗口正在检查（如后台定时扫描），请稍后再试');
+      }
       for (let i = 0; i < nodes.length; i++) {
         if (this.stopRequested) {
           break;
@@ -728,6 +787,7 @@ export class LinkHealthService {
     } finally {
       this.running = false;
       this.stopRequested = false;
+      await releaseScanLock();
     }
   }
 

@@ -533,6 +533,41 @@ describe('regressions', () => {
     expect(meta?.linkStatus).toBeUndefined();
   });
 
+  it('跨上下文扫描锁：他人持有且未过期时拒绝，过期或释放后放行', async () => {
+    const node = makeNode('bookmark-xlock', 'https://xlock.example.com/page');
+
+    // 他人持有未过期的锁 → 拒绝
+    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockImplementation(
+      async (key: string) =>
+        key === 'linkHealthScanLock'
+          ? { linkHealthScanLock: { owner: 'other-context', since: Date.now() } }
+          : {}
+    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      type: 'basic', ok: true, status: 200, url: 'https://xlock.example.com/page',
+    }));
+    await expect(
+      linkHealthService.checkBookmarks([node], { retries: 0 })
+    ).rejects.toThrow('另一个窗口正在检查');
+
+    // 锁已过期（TTL 之外）→ 放行并正常完成
+    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockImplementation(
+      async (key: string) =>
+        key === 'linkHealthScanLock'
+          ? { linkHealthScanLock: { owner: 'other-context', since: Date.now() - 91 * 60_000 } }
+          : {}
+    );
+    const results = await linkHealthService.checkBookmarks([node], { retries: 0 });
+    expect(results).toHaveLength(1);
+    // 完成后锁被释放（remove 被调用或锁不再属于他人）
+    expect((await auxDb.bookmarkMeta.get('bookmark-xlock'))?.linkStatus).toBe('active');
+
+    // 恢复默认 storage mock，避免实现泄漏到后续用例
+    (chrome.storage.local.get as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => ({})
+    );
+  });
+
   it('深度复核与批量检查互斥：任一进行中另一方直接抛错', async () => {
     // 检查进行中 → deepVerify 拒绝
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {

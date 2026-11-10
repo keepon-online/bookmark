@@ -348,4 +348,41 @@ describe('organizerService v2', () => {
 
     batchSpy.mockRestore();
   });
+
+  it('移动成功但标签事务失败：历史仍落库且移动可撤销', async () => {
+    (chrome.bookmarks.getChildren as Mock).mockResolvedValue([]);
+    (chrome.bookmarks.create as Mock).mockImplementation(
+      async (arg: chrome.bookmarks.BookmarkCreateArg) =>
+        ({
+          id: `folder-${arg.title}`,
+          parentId: arg.parentId ?? '1',
+          title: arg.title ?? '',
+          index: 0,
+        }) as chrome.bookmarks.BookmarkTreeNode
+    );
+    (chrome.bookmarks.move as Mock).mockResolvedValue({});
+    // 标签事务失败（如 IndexedDB 配额/锁冲突）
+    const putSpy = vi
+      .spyOn(auxDb.bookmarkMeta, 'put')
+      .mockRejectedValueOnce(new Error('QuotaExceededError'));
+
+    // "移动 + 标签"建议：github 规则命中会同时给出目录与标签
+    const suggestions = await organizerService.suggest(
+      [node('50', 'https://github.com/move-tag/x', 'move-tag')],
+      {}
+    );
+    expect(suggestions.length).toBeGreaterThan(0);
+
+    const result = await organizerService.apply(suggestions);
+    expect(result.moved).toBe(1);
+    expect(result.errors.length).toBeGreaterThan(0);
+
+    // 关键：applied===0（标签失败）但移动发生了——历史必须记录这次移动
+    const history = await organizerService.getHistory();
+    expect(history).toHaveLength(1);
+    expect(history[0].changes).toHaveLength(1);
+    expect(history[0].changes[0].type).toBe('move');
+
+    putSpy.mockRestore();
+  });
 });

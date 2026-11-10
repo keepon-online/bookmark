@@ -7,9 +7,8 @@
 // 视为那次运行已死并允许继续，避免永久卡住。
 //
 // 与手动扫描的关系：两者共用 selectCheckableNodes 的跳过规则，而"跳过最近检查
-// 过的"窗口（默认 24 小时）天然让刚手动扫过的书签不会被自动扫描重复检查。
-// 极端情况下（手动扫描进行中恰好有闹钟触发）可能重叠少量重复请求，结果一致，
-// 不做额外的跨上下文加锁。
+// 过的"窗口（默认 24 小时）天然让刚手动扫过的书签不会被自动扫描重复检查；
+// linkHealthService 侧另有跨上下文租约锁兜底并发。
 
 import { auxDb } from '@/lib/auxDatabase';
 import { createLogger } from '@/lib/logger';
@@ -47,6 +46,9 @@ export interface AutoScanProgress {
   lastFinishedAt?: number;
   // 最近一次失败原因（如权限不足导致整批抛错）
   lastError?: string;
+  // 连续失败批次数：续跑按指数退避（2→4→…分钟，封顶 60），
+  // 避免持续性故障造成"每分钟唤醒 SW"的死循环
+  failCount?: number;
 }
 
 export type AutoScanSkipReason = 'disabled' | 'running';
@@ -70,7 +72,7 @@ export interface AutoScanDeps {
   check: (nodes: BrowserBookmarkNode[], options: BatchCheckOptions) => Promise<LinkCheckResult[]>;
   readProgress: () => Promise<AutoScanProgress | undefined>;
   writeProgress: (progress: AutoScanProgress | undefined) => Promise<void>;
-  scheduleContinue: () => Promise<void>;
+  scheduleContinue: (delayMinutes?: number) => Promise<void>;
   clearContinue: () => Promise<void>;
   now: () => number;
 }
@@ -98,14 +100,26 @@ const defaultDeps: AutoScanDeps = {
       await chrome.storage.local.remove(AUTO_SCAN_PROGRESS_KEY);
     }
   },
-  scheduleContinue: async () => {
-    await chrome.alarms.create(AUTO_SCAN_CONTINUE_ALARM, { delayInMinutes: 1 });
+  scheduleContinue: async (delayMinutes?: number) => {
+    await chrome.alarms.create(AUTO_SCAN_CONTINUE_ALARM, { delayInMinutes: delayMinutes ?? 1 });
   },
   clearContinue: async () => {
     await chrome.alarms.clear(AUTO_SCAN_CONTINUE_ALARM);
   },
   now: () => Date.now(),
 };
+
+// 按用户设置估算一批的最差耗时（毫秒）。固定 20 分钟覆盖不了慢设置：
+// 并发 1 + 超时 30s + 重试 3 时一批 40 条可达 80+ 分钟，判死窗口
+// 小于它会把活批次误判成已死（周期闹钟重入 → 撞锁 → 错误循环）
+function estimateBatchWorstMs(settings: ScanSettings): number {
+  const timeoutMs = Math.max(1, settings.timeout) * 1000;
+  const retries = Math.max(0, settings.retries);
+  const concurrency = Math.max(1, settings.concurrency);
+  const backoffMs = retries > 0 ? 1000 * (2 ** retries - 1) : 0; // 退避和近似
+  const perItemWorst = timeoutMs * (retries + 1) + backoffMs;
+  return Math.ceil((AUTO_SCAN_BATCH_SIZE * perItemWorst) / concurrency);
+}
 
 /**
  * 跑一次自动扫描的"一片"。可重复调用：每次处理一批，直到 `finished` 为真。
@@ -123,11 +137,16 @@ export async function runAutoScanTick(
   const nowTs = deps.now();
   const progress = await deps.readProgress();
 
-  // 上一批还在进行（或刚被杀不久）：让开，等下一次闹钟
+  // 上一批还在进行（或刚被杀不久）：让开，等下一次闹钟。
+  // 判死窗口按实际设置动态放大，见 estimateBatchWorstMs
+  const staleMs = Math.max(AUTO_SCAN_STALE_MS, estimateBatchWorstMs(settings));
   if (
     progress?.runningSince &&
-    nowTs - progress.runningSince < AUTO_SCAN_STALE_MS
+    nowTs - progress.runningSince < staleMs
   ) {
+    // 补设续跑闹钟：本批触发时的一次性闹钟已消费，若持有者中途被杀，
+    // 不补设的话本轮只能等下一个周期闹钟（默认 24h）
+    await deps.scheduleContinue();
     return { skipped: 'running', checked: 0, remaining: 0, finished: false };
   }
 
@@ -147,11 +166,18 @@ export async function runAutoScanTick(
   }
 
   const batch = candidates.slice(0, AUTO_SCAN_BATCH_SIZE);
-  const startedAt = progress?.startedAt ?? nowTs;
-  const alreadyChecked = progress?.checked ?? 0;
+  // 新一轮（上一轮已完结）：本轮计数从零开始，不继承历史累计
+  const isNewRound = !!progress?.lastFinishedAt && !progress?.runningSince;
+  const startedAt = isNewRound ? nowTs : progress?.startedAt ?? nowTs;
+  const alreadyChecked = isNewRound ? 0 : progress?.checked ?? 0;
 
   // 标记"正在进行"，供下一次闹钟判断是否需要让开
-  await deps.writeProgress({ runningSince: nowTs, startedAt, checked: alreadyChecked });
+  await deps.writeProgress({
+    runningSince: nowTs,
+    startedAt,
+    checked: alreadyChecked,
+    failCount: progress?.failCount,
+  });
 
   let lastError: string | undefined;
   let checkedCount = batch.length;
@@ -168,17 +194,19 @@ export async function runAutoScanTick(
 
   const remaining = candidates.length - batch.length;
   const checked = alreadyChecked + checkedCount;
+  // 失败批次指数退避（2→4→…分钟，封顶 60）；成功批次归零
+  const failCount = lastError ? (progress?.failCount ?? 0) + 1 : 0;
 
   if (remaining > 0) {
-    // 还有剩：记进度并安排 1 分钟后的续跑
-    await deps.writeProgress({ startedAt, checked, lastError });
-    await deps.scheduleContinue();
+    // 还有剩：记进度并安排续跑
+    await deps.writeProgress({ startedAt, checked, lastError, failCount });
+    await deps.scheduleContinue(lastError ? Math.min(2 ** failCount, 60) : 1);
     return { checked: batch.length, remaining, finished: false };
   }
 
   // 本轮跑完
   await deps.clearContinue();
-  await deps.writeProgress({ startedAt, checked, lastFinishedAt: deps.now(), lastError });
+  await deps.writeProgress({ startedAt, checked, lastFinishedAt: deps.now(), lastError, failCount });
   return { checked: batch.length, remaining: 0, finished: true };
 }
 

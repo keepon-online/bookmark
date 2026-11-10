@@ -5,7 +5,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { AuxBookmarkMeta, BrowserBookmarkNode } from '@/types';
 import type { OrganizeHistory } from '@/types/organizer';
-import { loadLearnedRules, saveLearnedRules, type LearnedDomainRules } from './learnedRules';
+import { loadLearnedRules, saveLearnedRules, trimLearnedRules, type LearnedDomainRules } from './learnedRules';
 import { getUrlKey } from './utils';
 
 // 死链检查记录
@@ -265,6 +265,10 @@ export async function exportAuxData(): Promise<AuxExportData> {
 // 导入的元数据行是不可信的外部数据（手工编辑过的备份/旧版本导出），
 // 缺字段会让渲染路径（record.tags 遍历等）直接抛 TypeError。
 // 逐行规范化并丢弃没有主键的行，避免导入后白屏
+function numOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function normalizeImportedMeta(row: unknown): AuxBookmarkMeta | null {
   if (!row || typeof row !== 'object') return null;
   const r = row as Record<string, unknown>;
@@ -275,8 +279,21 @@ function normalizeImportedMeta(row: unknown): AuxBookmarkMeta | null {
     bookmarkId,
     tags: Array.isArray(r.tags) ? r.tags.filter((t): t is string => typeof t === 'string') : [],
     isFavorite: Boolean(r.isFavorite),
-    visitCount: typeof r.visitCount === 'number' ? r.visitCount : 0,
+    visitCount: typeof r.visitCount === 'number' && Number.isFinite(r.visitCount) ? r.visitCount : 0,
+    // 数字字段显式收敛：字符串 orphanedAt 会让 TTL 比较为 NaN，
+    // 该行将永久 pending 永不清理
+    orphanedAt: numOrUndefined(r.orphanedAt),
+    linkCheckedAt: numOrUndefined(r.linkCheckedAt),
+    lastVisited: numOrUndefined(r.lastVisited),
+    lastStatusCode: numOrUndefined(r.lastStatusCode),
+    lastResponseTime: numOrUndefined(r.lastResponseTime),
   } as AuxBookmarkMeta;
+}
+
+// 有主键的行才允许入库（bulkPut 遇到缺主键的行整批抛错）
+function rowsWithKey<T extends { id: string }>(rows: unknown): T[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((row): row is T => !!row && typeof (row as T).id === 'string');
 }
 
 // 导入元数据（合并写入，不覆盖未涉及的记录；学习规则按 key 合并，导入方优先）
@@ -293,13 +310,28 @@ export async function importAuxData(data: AuxExportData): Promise<void> {
     }
   }
   if (data.linkChecks?.length) {
-    await auxDb.linkChecks.bulkPut(data.linkChecks);
+    await auxDb.linkChecks.bulkPut(rowsWithKey<LinkCheckRecord>(data.linkChecks));
   }
   if (data.organizeHistory?.length) {
-    await auxDb.organizeHistory.bulkPut(data.organizeHistory);
+    await auxDb.organizeHistory.bulkPut(rowsWithKey<OrganizeHistory>(data.organizeHistory));
   }
-  if (data.learnedDomainRules && Object.keys(data.learnedDomainRules).length > 0) {
-    const current = await loadLearnedRules();
-    await saveLearnedRules({ ...current, ...data.learnedDomainRules });
+  if (data.learnedDomainRules && typeof data.learnedDomainRules === 'object') {
+    // 学习规则逐条校验：畸形值（字符串/缺 folder）会让 matchLearnedRule
+    // 返回 undefined tags，整理建议全流程 TypeError
+    const clean: Record<string, { folder: string; tags: string[]; learnedAt: number }> = {};
+    for (const [domain, value] of Object.entries(data.learnedDomainRules)) {
+      if (!domain || !value || typeof value !== 'object') continue;
+      const v = value as unknown as Record<string, unknown>;
+      if (typeof v.folder !== 'string' || !v.folder) continue;
+      clean[domain] = {
+        folder: v.folder,
+        tags: Array.isArray(v.tags) ? v.tags.filter((t): t is string => typeof t === 'string') : [],
+        learnedAt: typeof v.learnedAt === 'number' && Number.isFinite(v.learnedAt) ? v.learnedAt : Date.now(),
+      };
+    }
+    if (Object.keys(clean).length > 0) {
+      const current = await loadLearnedRules();
+      await saveLearnedRules(trimLearnedRules({ ...current, ...clean }));
+    }
   }
 }

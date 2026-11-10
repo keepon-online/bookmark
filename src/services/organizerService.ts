@@ -301,7 +301,9 @@ export class OrganizerService {
       await saveLearnedRules(trimLearnedRules(learned));
     }
 
-    if (result.applied > 0) {
+    // applied===0 但 changes 非空：单条"移动成功、标签事务失败"的场景——
+    // 书签已被移走，历史必须落库，否则该移动永久失去撤销
+    if (result.applied > 0 || changes.length > 0) {
       const finishedAt = now();
       // 新流程是"用户在预览里逐条勾选"，没有策略/阈值这类输入，因此这里记录的是
       // 从本次实际执行推导出来的等价信息（不是用户输入，也不含未实现的能力）

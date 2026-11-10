@@ -127,6 +127,8 @@ URL: {url}
  * deepseek-chat: ¥1/百万 tokens
  */
 const TOKEN_PRICE = 0.000001; // 每个人民币能买的 tokens
+// 持久化缓存条目上限（防 10MB 配额；按时间戳保留最新）
+const CACHE_MAX_ENTRIES = 1500;
 const logger = createLogger('DeepSeekAI');
 
 /**
@@ -588,9 +590,14 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
   private async saveCache(): Promise<void> {
     try {
       const nowTs = Date.now();
-      const cacheObj = Object.fromEntries(
-        [...this.cache.entries()].filter(([, value]) => value.expiresAt > nowTs)
-      );
+      // 条目上限：单 key 全量 JSON 写 storage.local（默认配额 10MB），
+      // 条目含 reasoning 全文，大书签库 24h 窗口内可逼近配额——
+      // 超限后 set 永久静默失败，缓存（与对应的 API 费用）白白丢失
+      const entries = [...this.cache.entries()]
+        .filter(([, value]) => value.expiresAt > nowTs)
+        .sort((a, b) => b[1].timestamp - a[1].timestamp)
+        .slice(0, CACHE_MAX_ENTRIES);
+      const cacheObj = Object.fromEntries(entries);
       await chrome.storage.local.set({
         deepseekClassificationCache: cacheObj,
       });
@@ -636,8 +643,10 @@ ${shown.map((f) => `- ${f}`).join('\n')}${truncated ? '\n（文件夹较多，�
     this.costStats.avgCostPerClassify =
       this.costStats.totalCost / this.costStats.classifyCount;
 
-    // 更新每日统计
-    const today = new Date().toISOString().split('T')[0];
+    // 更新每日统计。按本地时区切日：toISOString 是 UTC，
+    // UTC+8 用户每天早上 8 点才换日，账目跨日串账
+    const now2 = new Date();
+    const today = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}-${String(now2.getDate()).padStart(2, '0')}`;
     const todayStat = this.costStats.dailyStats.find((s) => s.date === today);
     if (todayStat) {
       todayStat.tokens += tokens;

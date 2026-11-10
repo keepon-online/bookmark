@@ -164,4 +164,47 @@ describe('runAutoScanTick', () => {
     // 0 条实查 → 进度保持原值，不按整批虚增
     expect(store.get()?.checked).toBe(3);
   });
+
+  it('批次失败按指数退避续跑，成功后恢复 1 分钟间隔', async () => {
+    const nodes = Array.from({ length: AUTO_SCAN_BATCH_SIZE + 1 }, (_, i) =>
+      node(`n${i}`, `https://a${i}.com/`)
+    );
+    const store = makeStore();
+    const { deps, check, scheduleContinue } = makeDeps(nodes, {}, { store });
+
+    // 第一次：整批抛错 → failCount=1 → 2 分钟后续跑
+    check.mockRejectedValueOnce(new Error('boom'));
+    await runAutoScanTick(deps);
+    expect(scheduleContinue).toHaveBeenLastCalledWith(2);
+    expect(store.get()?.failCount).toBe(1);
+
+    // 第二次：成功 → failCount 归零 → 1 分钟间隔
+    await runAutoScanTick(deps);
+    expect(scheduleContinue).toHaveBeenLastCalledWith(1);
+    expect(store.get()?.failCount).toBe(0);
+  });
+
+  it('新一轮（上一轮已完结）计数从零开始，不继承历史累计', async () => {
+    // 上一轮已跑完：checked=99 是历史累计，新一轮应清零
+    const store = makeStore({ startedAt: NOW - 10_000, checked: 99, lastFinishedAt: NOW - 5_000 });
+    const { deps } = makeDeps([node('1', 'https://a.com/')], {}, { store });
+
+    const result = await runAutoScanTick(deps);
+
+    expect(result.finished).toBe(true);
+    expect(store.get()?.checked).toBe(1);
+    expect(store.get()?.startedAt).toBe(NOW);
+  });
+
+  it('让开（running）时补设续跑闹钟，避免持有者被杀后本轮停摆', async () => {
+    const store = makeStore({ runningSince: NOW - 1_000, startedAt: NOW - 1_000, checked: 5 });
+    const { deps, check, scheduleContinue } = makeDeps([node('1', 'https://a.com/')], {}, { store });
+
+    const result = await runAutoScanTick(deps);
+
+    expect(result.skipped).toBe('running');
+    expect(check).not.toHaveBeenCalled();
+    // 一次性续跑闹钟在本批触发时已消费：让开的同时补设
+    expect(scheduleContinue).toHaveBeenCalledTimes(1);
+  });
 });

@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { browserBookmarks } from '@/services/browserBookmarksService';
 import { auxDb, defaultMeta, reconcileMeta } from '@/lib/auxDatabase';
 import { getUrlKey, now } from '@/lib/utils';
+import { AUTO_SCAN_PROGRESS_KEY } from '@/services/linkHealthAutoScan';
 import type {
   AuxBookmarkMeta,
   BrowserBookmarkFilter,
@@ -63,6 +64,11 @@ let unsubscribeEvents: (() => void) | null = null;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 // 进行中的 refresh（单飞合并用）
 let refreshInFlight: Promise<void> | null = null;
+// in-flight 期间又有 refresh 请求：完成后补刷一次，
+// 避免"共享旧快照"吞掉执行期间发生的书签变更
+let refreshQueued = false;
+// 后台扫描完成监听只挂一次
+let autoScanWatchSubscribed = false;
 
 const EVENT_RELOAD_DEBOUNCE_MS = 150;
 
@@ -119,6 +125,21 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
           }, EVENT_RELOAD_DEBOUNCE_MS);
         });
       }
+      // 后台定时扫描写 aux 不触发任何书签事件——常驻侧栏的失效状态
+      // 会在扫描完成后长期陈旧。监听进度键：一轮跑完（出现
+      // lastFinishedAt）时自动重载元数据
+      if (!autoScanWatchSubscribed && typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+        autoScanWatchSubscribed = true;
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area !== 'local') return;
+          const progress = changes[AUTO_SCAN_PROGRESS_KEY]?.newValue as
+            | { lastFinishedAt?: number }
+            | undefined;
+          if (progress?.lastFinishedAt) {
+            void get().refresh();
+          }
+        });
+      }
       set({ isInitialized: true });
     } catch (error) {
       set({ error: (error as Error).message });
@@ -128,11 +149,18 @@ export const useBrowserBookmarkStore = create<BrowserBookmarkState>((set, get) =
   },
 
   refresh: async () => {
-    // 单飞合并：手动写操作后的 refresh 与事件去抖的 refresh 并发时，
-    // 两个全量快照交错 set 会让慢的旧快照覆盖新数据（删除的书签
-    // "复活"）。并发调用共享同一次执行，语义上等价于"再刷一遍"
+    // 单飞 + 尾随补刷：并发调用共享同一次执行；若执行期间又有新的
+    // refresh 请求（如去抖事件），完成后追加一次新快照——否则第一个
+    // 请求者拿到的旧快照会覆盖期间发生的书签变更
     if (refreshInFlight) {
-      return refreshInFlight;
+      refreshQueued = true;
+      return refreshInFlight.then(() => {
+        if (!refreshQueued) {
+          return;
+        }
+        refreshQueued = false;
+        return get().refresh();
+      });
     }
     refreshInFlight = (async () => {
       try {
