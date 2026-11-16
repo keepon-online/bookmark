@@ -42,3 +42,6 @@ jobs:
 
       - name: 生产构建
         run: pnpm build
+
+      - name: Firefox 生产构建
+        run: pnpm build:firefox
