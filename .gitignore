@@ -11,3 +11,4 @@ dist/
 .zcode/
 .auto/
 autoresearch-dashboard.html
+coverage/
