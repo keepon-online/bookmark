@@ -17,6 +17,29 @@
 - 📊 **书签档案** — 域名分布、分类画像、组织度评分、收藏家等级
 - 📱 **侧边栏** — Chrome Sidepanel 常驻，快捷键 Alt+Shift+S
 
+## 安装
+
+### 方式一：Release 包（推荐）
+
+从 [Releases](https://github.com/keepon-online/bookmark/releases) 下载对应浏览器
+的 zip 包，按下方步骤加载。
+
+### Chrome / Edge（加载已解压的扩展程序）
+
+1. 解压 `smart-bookmark-<version>-chrome.zip`
+2. 打开 `chrome://extensions`，右上角开启「开发者模式」
+3. 点击「加载已解压的扩展程序」，选择解压出的目录
+
+### Firefox
+
+1. 解压 `smart-bookmark-<version>-firefox.zip`
+2. 打开 `about:debugging` → 「此 Firefox」→ 「临时载入附加组件」
+3. 选择解压目录中的 `manifest.json`
+
+> Firefox 临时载入重启浏览器后失效；长期使用建议通过
+> [addons.mozilla.org](https://addons.mozilla.org/) 发布的正式签名版本安装，
+> 或使用 [web-ext](https://github.com/mozilla/web-ext) 自签名。
+
 ## 技术栈
 
 - **框架**: WXT（Chrome MV3 / Firefox MV2 双端构建）
@@ -39,6 +62,9 @@ pnpm verify      # 提交前自检：typecheck + lint + test + build
 
 ## 文档
 
+- [更新日志](./CHANGELOG.md)
+- [贡献指南](./CONTRIBUTING.md)
+- [隐私政策](./PRIVACY.md)
 - [文档索引](./docs/README.md)
 - [架构设计](./docs/architecture.md)
 - [API 参考](./docs/api.md)
