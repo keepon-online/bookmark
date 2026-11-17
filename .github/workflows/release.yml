@@ -44,7 +44,9 @@ jobs:
       - name: 校验产物
         run: |
           ls -la .output/*.zip
-          for z in .output/*.zip; do
+          # 只校验双端浏览器包；*-sources.zip 是 WXT 生成的 AMO 源码包，
+          # 结构是源码树而非构建产物，不含根级 manifest.json，属正常
+          for z in .output/smart-bookmark-*-chrome.zip .output/smart-bookmark-*-firefox.zip; do
             unzip -l "$z" | grep -q manifest.json || { echo "missing manifest.json in $z"; exit 1; }
           done
 
@@ -55,3 +57,4 @@ jobs:
           files: |
             .output/smart-bookmark-*-chrome.zip
             .output/smart-bookmark-*-firefox.zip
+            .output/smart-bookmark-*-sources.zip
